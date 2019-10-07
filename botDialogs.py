@@ -2,7 +2,8 @@ DIALOGS = {
     'create_ad_info': 'Non vendere scarpe tarocche, e cose così insomma... Confermi?',
     'need_reset': 'Utente non riconosciuto, o in stato non consistente, premi /reset per tornare al menu',
     'digit_error': 'Perfavore, inserisci un numero',
-    'photo_not_requested': 'Non dovresti mandarmi una foto in questo momento...'
+    'photo_not_requested': 'Non dovresti mandarmi una foto in questo momento...',
+    'ad_success': 'Annuncio inserito! Se ritenuto idoneo dovresti vederlo tra pochi minuti sul canale'
 }
 
 KEYBOARD_TEXTS = {
@@ -13,5 +14,6 @@ KEYBOARD_TEXTS = {
     'number_selection': 'Inserisci il numero della scarpa',
     'condition_selection': 'In che condizione sono le scarpe?',
     'price_selection': 'A quanto le vendi?',
-    'photo_insertion': 'Manda la foto della tua scarpa'
+    'photo_insertion': 'Manda la foto della tua scarpa',
+    'ad_complete_confirm': 'Annuncio creato, vuoi postarlo?'
 }

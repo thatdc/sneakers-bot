@@ -1,6 +1,6 @@
 from telegram.ext import (Updater, ConversationHandler, CommandHandler, CallbackQueryHandler,
                             MessageHandler, filters)
-from telegram import KeyboardButton, ReplyKeyboardMarkup
+from telegram import KeyboardButton, ReplyKeyboardMarkup, ParseMode
 from stages import Stages
 from ads import Ads
 import botDialogs
@@ -62,6 +62,10 @@ class Sneakerbot(object):
         keyboards[Stages.CONDITION_SELECTION] = (botDialogs.KEYBOARD_TEXTS['condition_selection'],[
             [KeyboardButton("Nuove"), KeyboardButton("Usate")]
         ])
+        keyboards[Stages.AD_INSERT] = (botDialogs.KEYBOARD_TEXTS['ad_complete_confirm'], [
+            [KeyboardButton("Confermo"),
+            KeyboardButton("Reset")]
+        ])
 
         return keyboards
 
@@ -80,7 +84,7 @@ class Sneakerbot(object):
         handlers.append(MessageHandler(filters.Filters.regex(r'Crea annuncio'), self.new_ads))
         handlers.append(MessageHandler(filters.Filters.regex(r'Reset'), self.reset))
         handlers.append(CommandHandler("reset", self.reset))
-        handlers.append(MessageHandler(filters.Filters.regex(r'Confermo'), self.region_select))
+        handlers.append(MessageHandler(filters.Filters.regex(r'Confermo'), self.confirm_operation))
         handlers.append(MessageHandler(filters.Filters.text, self.text_handle))
         handlers.append(MessageHandler(filters.Filters.photo, self.image_handler))
 
@@ -97,11 +101,27 @@ class Sneakerbot(object):
         self.user_stage[user.id] = Stages.MENU
         self.set_keyboard(user, update)
 
+    def confirm_operation(self, update, context):
+        message = update.message
+        user = message.from_user
+        chat_id = message.chat_id
+        bot = context.bot
+
+        if user.id not in self.user_stage.keys(): # Check user
+            bot.send_message(chat_id, botDialogs.DIALOGS['need_reset'])
+            return
+
+        if self.user_stage[user.id] is Stages.AD_CONFIRM:
+            self.region_select(update, context)
+        elif self.user_stage[user.id] is Stages.AD_INSERT:
+            self.insert_ad(update, context)
+
     def new_ads(self, update, context):
         message = update.message
         user = message.from_user
         chat_id = message.chat_id
         bot = context.bot
+
         if user.id not in self.user_stage.keys() or self.user_stage[user.id] is not Stages.MENU: # Check current stage
             bot.send_message(chat_id, "Comando non permesso in questo momento")
             return
@@ -130,6 +150,26 @@ class Sneakerbot(object):
 
         # Set the correct keyboard
         self.set_keyboard(user, update)
+
+    def insert_ad(self, update, context):
+        message = update.message
+        user = message.from_user
+        chat_id = message.chat_id
+        bot = context.bot
+
+        bot.send_message(chat_id, botDialogs.DIALOGS['ad_success'])
+        caption = self.format_ad(user)
+        bot.send_photo(chat_id=chat_id, photo=self.pending_ads[user.id].photo, caption=caption,
+                        parse_mode=ParseMode.MARKDOWN)
+
+        # Insert the ad
+        self.ads.append(self.pending_ads[user.id])
+
+        # Back to the menu
+        self.user_stage[user.id] = Stages.MENU
+        self.set_keyboard(user, update)
+
+        self.logger.info("User %s confirmed his Ad", user.name)
 
     def text_handle(self, update, context):
         message = update.message
@@ -203,7 +243,19 @@ class Sneakerbot(object):
             self.logger.info("User %s sent his shoe photo: id->%s", user.name, message.photo[0].file_id)
             self.pending_ads[user.id].photo = message.photo[0].file_id
             self.user_stage[user.id] = Stages.AD_INSERT
+            self.set_keyboard(user, update)
+
         return
+
+    def format_ad(self, user):
+        ad = self.pending_ads[user.id]
+        caption = '*' + ad.shoe_name + '*'
+        caption = caption + '\nLuogo: ' + ad.region
+        caption = caption + '\nCondizione: ' + ad.condition + ' | ' + str(ad.price) + '€'
+        caption = caption +'\nNumero: '+str(ad.number)
+        caption = caption + '\nContattare: ' + user.name
+
+        return caption
 
     def run(self):
         # Start the bot

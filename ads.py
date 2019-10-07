@@ -7,3 +7,4 @@ class Ads(object):
         self.condition = ""
         self.price = -1
         self.photo = ""
+        self.id = ""
