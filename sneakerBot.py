@@ -48,6 +48,7 @@ class Sneakerbot(object):
             [KeyboardButton("Confermo"),
             KeyboardButton("Reset")]
         ])
+        # Do this shit somehow better
         keyboards[Stages.REGION_SELECT] = (botDialogs.KEYBOARD_TEXTS['region_select'], [
             [KeyboardButton("Abruzzo"), KeyboardButton("Basilicata"), KeyboardButton("Calabria")],
             [KeyboardButton("Campania"), KeyboardButton("Emilia Romagna"), KeyboardButton("Friuli-Venezia Giulia")],
@@ -56,6 +57,10 @@ class Sneakerbot(object):
             [KeyboardButton("Puglia"), KeyboardButton("Sardegna"), KeyboardButton("Sicilia")],
             [KeyboardButton("Toscana"), KeyboardButton("Trentino-Alto Adige"), KeyboardButton("Umbria")],
             [KeyboardButton("Val d'Aosta"), KeyboardButton("Veneto")],
+        ])
+        # Also this
+        keyboards[Stages.CONDITION_SELECTION] = (botDialogs.KEYBOARD_TEXTS['condition_selection'],[
+            [KeyboardButton("Nuove"), KeyboardButton("Usate")]
         ])
 
         return keyboards
@@ -76,7 +81,8 @@ class Sneakerbot(object):
         handlers.append(MessageHandler(filters.Filters.regex(r'Reset'), self.reset))
         handlers.append(CommandHandler("reset", self.reset))
         handlers.append(MessageHandler(filters.Filters.regex(r'Confermo'), self.region_select))
-        handlers.append(MessageHandler(filters.Filters.all, self.text_handle))
+        handlers.append(MessageHandler(filters.Filters.text, self.text_handle))
+        handlers.append(MessageHandler(filters.Filters.photo, self.image_handler))
 
         return handlers
 
@@ -85,6 +91,8 @@ class Sneakerbot(object):
         user = message.from_user
         chat_id = message.chat_id
         bot = context.bot
+
+        self.logger.info("User %s aborted his ad, going back to menu...", user.name)
 
         self.user_stage[user.id] = Stages.MENU
         self.set_keyboard(user, update)
@@ -157,7 +165,45 @@ class Sneakerbot(object):
                 self.pending_ads[user.id].number = int(message.text)
                 self.logger.info("User %s inserted shoe number: %d", user.name, int(message.text))
                 self.user_stage[user.id] = Stages.CONDITION_SELECTION
+                self.set_keyboard(user, update)
+            return
 
+        # Condition selection
+        if self.user_stage[user.id] is Stages.CONDITION_SELECTION:
+            self.pending_ads[user.id].condition = message.text
+            self.logger.info("User %s inserted condition: %s", user.name, message.text)
+            self.user_stage[user.id] = Stages.PRICE_SELECTION
+            bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['price_selection'])
+            return
+
+        # Price selection
+        if self.user_stage[user.id] is Stages.PRICE_SELECTION:
+            if not message.text.isdigit():
+                bot.send_message(chat_id, botDialogs.DIALOGS['digit_error'])
+            else:
+                self.pending_ads[user.id].price = int(message.text)
+                self.logger.info("User %s inserted price: %d", user.name, int(message.text))
+                self.user_stage[user.id] = Stages.PHOTO_INSERTION
+                bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['photo_insertion'])
+            return
+
+    def image_handler(self, update, context):
+        message = update.message
+        user = message.from_user
+        chat_id = message.chat_id
+        bot = context.bot
+
+        if user.id not in self.user_stage.keys(): # Check user
+            bot.send_message(chat_id, botDialogs.DIALOGS['need_reset'])
+            return
+
+        if self.user_stage[user.id] is not Stages.PHOTO_INSERTION:
+            bot.send_message(chat_id, botDialogs.DIALOGS['photo_not_requested'])
+        else:
+            self.logger.info("User %s sent his shoe photo: id->%s", user.name, message.photo[0].file_id)
+            self.pending_ads[user.id].photo = message.photo[0].file_id
+            self.user_stage[user.id] = Stages.AD_INSERT
+        return
 
     def run(self):
         # Start the bot
