@@ -3,6 +3,7 @@ from telegram.ext import (Updater, ConversationHandler, CommandHandler, Callback
 from telegram import KeyboardButton, ReplyKeyboardMarkup, ParseMode
 from stages import Stages
 from ads import Ads
+from adTypes import AdTypes
 import botDialogs
 import logging
 
@@ -66,6 +67,10 @@ class Sneakerbot(object):
             [KeyboardButton("Confermo"),
             KeyboardButton("Reset")]
         ])
+        keyboards[Stages.AD_TYPE_SELECT] = (botDialogs.KEYBOARD_TEXTS['ad_type_select'], [
+            [KeyboardButton("Cerco"),
+            KeyboardButton("Vendo")]
+        ])
 
         return keyboards
 
@@ -112,9 +117,24 @@ class Sneakerbot(object):
             return
 
         if self.user_stage[user.id] is Stages.AD_CONFIRM:
-            self.region_select(update, context)
+            # Create a new ad object
+            self.pending_ads[user.id] = Ads(user.id)
+            self.ad_type_select(update, context)
         elif self.user_stage[user.id] is Stages.AD_INSERT:
             self.insert_ad(update, context)
+
+    def ad_type_select(self, update, context):
+        message = update.message
+        user = message.from_user
+        chat_id = message.chat_id
+        bot = context.bot
+
+        if user.id not in self.user_stage.keys(): # Check user
+            bot.send_message(chat_id, botDialogs.DIALOGS['need_reset'])
+            return
+
+        self.user_stage[user.id] = Stages.AD_TYPE_SELECT
+        self.set_keyboard(user, update)
 
     def new_ads(self, update, context):
         message = update.message
@@ -140,13 +160,11 @@ class Sneakerbot(object):
         chat_id = message.chat_id
         bot = context.bot
 
-        if user.id not in self.user_stage.keys() or self.user_stage[user.id] is not Stages.AD_CONFIRM: # Check current stage
+        if user.id not in self.user_stage.keys() or self.user_stage[user.id] is not Stages.AD_TYPE_SELECT: # Check current stage
             bot.send_message(chat_id, "Comando non permesso in questo momento")
             return
 
         self.user_stage[user.id] = Stages.REGION_SELECT
-        # Create a new ad object
-        self.pending_ads[user.id] = Ads(user.id)
 
         # Set the correct keyboard
         self.set_keyboard(user, update)
@@ -158,9 +176,6 @@ class Sneakerbot(object):
         bot = context.bot
 
         bot.send_message(chat_id, botDialogs.DIALOGS['ad_success'])
-        caption = self.format_ad(user)
-        bot.send_photo(chat_id=chat_id, photo=self.pending_ads[user.id].photo, caption=caption,
-                        parse_mode=ParseMode.MARKDOWN)
 
         # Insert the ad
         self.ads.append(self.pending_ads[user.id])
@@ -179,6 +194,20 @@ class Sneakerbot(object):
 
         if user.id not in self.user_stage.keys(): # Check user
             bot.send_message(chat_id, botDialogs.DIALOGS['need_reset'])
+            return
+
+        # Ad type selection
+        if self.user_stage[user.id] is Stages.AD_TYPE_SELECT:
+            if message.text == "Cerco":
+                self.pending_ads[user.id].type = AdTypes.BUY
+                self.region_select(update, context)
+            elif message.text == "Vendo":
+                self.pending_ads[user.id].type = AdTypes.SELL
+                self.region_select(update, context)
+            else:
+                print(message.text)
+                bot.send_message(chat_id, botDialogs.DIALOGS['type_not_valid'])
+                set_keyboard(user, update)
             return
 
         # Region selection
@@ -213,7 +242,10 @@ class Sneakerbot(object):
             self.pending_ads[user.id].condition = message.text
             self.logger.info("User %s inserted condition: %s", user.name, message.text)
             self.user_stage[user.id] = Stages.PRICE_SELECTION
-            bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['price_selection'])
+            if self.pending_ads[user.id].type is AdTypes.SELL:
+                bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['price_selection_sell'])
+            elif self.pending_ads[user.id].type is AdTypes.BUY:
+                bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['price_selection_buy'])
             return
 
         # Price selection
@@ -223,9 +255,28 @@ class Sneakerbot(object):
             else:
                 self.pending_ads[user.id].price = int(message.text)
                 self.logger.info("User %s inserted price: %d", user.name, int(message.text))
-                self.user_stage[user.id] = Stages.PHOTO_INSERTION
-                bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['photo_insertion'])
+                if self.pending_ads[user.id].type is AdTypes.SELL:
+                    self.user_stage[user.id] = Stages.PHOTO_INSERTION
+                    bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['photo_insertion'])
+                elif self.pending_ads[user.id].type is AdTypes.BUY :
+                    self.send_ad_preview(update, context)
+                    self.user_stage[user.id] = Stages.AD_INSERT
+                    self.set_keyboard(user, update)
             return
+
+    def send_ad_preview(self, update, context):
+        message = update.message
+        user = message.from_user
+        chat_id = message.chat_id
+        bot = context.bot
+
+        caption = self.format_ad(user)
+
+        if self.pending_ads[user.id].type is AdTypes.SELL:
+            bot.send_photo(chat_id=chat_id, photo=self.pending_ads[user.id].photo, caption=caption,
+                            parse_mode=ParseMode.MARKDOWN)
+        else:
+            bot.send_message(chat_id=chat_id, text=caption, parse_mode=ParseMode.MARKDOWN)
 
     def image_handler(self, update, context):
         message = update.message
@@ -242,6 +293,7 @@ class Sneakerbot(object):
         else:
             self.logger.info("User %s sent his shoe photo: id->%s", user.name, message.photo[0].file_id)
             self.pending_ads[user.id].photo = message.photo[0].file_id
+            self.send_ad_preview(update, context)
             self.user_stage[user.id] = Stages.AD_INSERT
             self.set_keyboard(user, update)
 
@@ -249,11 +301,19 @@ class Sneakerbot(object):
 
     def format_ad(self, user):
         ad = self.pending_ads[user.id]
-        caption = '*' + ad.shoe_name + '*'
-        caption = caption + '\nLuogo: ' + ad.region
-        caption = caption + '\nCondizione: ' + ad.condition + ' | ' + str(ad.price) + '€'
-        caption = caption +'\nNumero: '+str(ad.number)
-        caption = caption + '\nContattare: ' + user.name
+
+        if ad.type is AdTypes.SELL:
+            caption = 'Vendo *' + ad.shoe_name + '*'
+            caption = caption + '\nLuogo: ' + ad.region
+            caption = caption + '\nCondizione: ' + ad.condition + ' | ' + str(ad.price) + '€'
+            caption = caption +'\nNumero: '+str(ad.number)
+            caption = caption + '\nContattare: ' + user.name
+        else:
+            caption = 'Cerco *' + ad.shoe_name + '*'
+            caption = caption + '\nLuogo: ' + ad.region
+            caption = caption + '\nCondizione: ' + ad.condition + ' | ' + 'Budget: ' + str(ad.price) + '€'
+            caption = caption +'\nNumero: '+str(ad.number)
+            caption = caption + '\nContattare: ' + user.name
 
         return caption
 
