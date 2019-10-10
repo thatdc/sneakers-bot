@@ -1,3 +1,5 @@
+import uuid
+
 class Ads(object):
     def __init__(self, user):
         self.user = user
@@ -8,4 +10,4 @@ class Ads(object):
         self.condition = ""
         self.price = -1
         self.photo = ""
-        self.id = ""
+        self.id = str(uuid.uuid4())

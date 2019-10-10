@@ -6,6 +6,7 @@ from ads import Ads
 from adTypes import AdTypes
 import botDialogs
 import logging
+import uuid
 
 class Sneakerbot(object):
     def __init__(self, bot_token):
@@ -87,6 +88,7 @@ class Sneakerbot(object):
         handlers = []
         handlers.append(CommandHandler("start", self.start))
         handlers.append(MessageHandler(filters.Filters.regex(r'Crea annuncio'), self.new_ads))
+        handlers.append(MessageHandler(filters.Filters.regex(r'I miei annunci'), self.my_ads))
         handlers.append(MessageHandler(filters.Filters.regex(r'Reset'), self.reset))
         handlers.append(CommandHandler("reset", self.reset))
         handlers.append(MessageHandler(filters.Filters.regex(r'Confermo'), self.confirm_operation))
@@ -104,6 +106,20 @@ class Sneakerbot(object):
         self.logger.info("User %s aborted his ad, going back to menu...", user.name)
 
         self.user_stage[user.id] = Stages.MENU
+        self.set_keyboard(user, update)
+
+    def my_ads(self, update, context):
+        message = update.message
+        user = message.from_user
+        chat_id = message.chat_id
+        bot = context.bot
+
+        self.logger.info("Sending ads info to %s", user.name)
+
+        my_ads = filter(lambda x: x.user == user.id, self.ads)
+        for a in my_ads:
+            self.send_ad(bot, chat_id, a, user, True)
+
         self.set_keyboard(user, update)
 
     def confirm_operation(self, update, context):
@@ -270,13 +286,19 @@ class Sneakerbot(object):
         chat_id = message.chat_id
         bot = context.bot
 
-        caption = self.format_ad(user)
+        ad = self.pending_ads[user.id]
+        self.send_ad(bot, chat_id, ad, user)
 
-        if self.pending_ads[user.id].type is AdTypes.SELL:
-            bot.send_photo(chat_id=chat_id, photo=self.pending_ads[user.id].photo, caption=caption,
-                            parse_mode=ParseMode.MARKDOWN)
-        else:
+    def send_ad(self, bot, chat_id, ad, user, review=False):
+
+
+        caption = self.format_ad(ad, user, review)
+
+        if ad.type is AdTypes.BUY:
             bot.send_message(chat_id=chat_id, text=caption, parse_mode=ParseMode.MARKDOWN)
+        elif ad.type is AdTypes.SELL:
+            bot.send_photo(chat_id=chat_id, photo=ad.photo, caption=caption,
+                            parse_mode=ParseMode.MARKDOWN)
 
     def image_handler(self, update, context):
         message = update.message
@@ -299,9 +321,11 @@ class Sneakerbot(object):
 
         return
 
-    def format_ad(self, user):
+    def format_pending_ad(self, user, review=False):
         ad = self.pending_ads[user.id]
+        return self.format_ad(ad, user, review)
 
+    def format_ad(self, ad, user, review=False):
         if ad.type is AdTypes.SELL:
             caption = 'Vendo *' + ad.shoe_name + '*'
             caption = caption + '\nLuogo: ' + ad.region
@@ -314,6 +338,9 @@ class Sneakerbot(object):
             caption = caption + '\nCondizione: ' + ad.condition + ' | ' + 'Budget: ' + str(ad.price) + '€'
             caption = caption +'\nNumero: '+str(ad.number)
             caption = caption + '\nContattare: ' + user.name
+
+        if review:
+            caption = caption + '\nID: ' + ad.id
 
         return caption
 
