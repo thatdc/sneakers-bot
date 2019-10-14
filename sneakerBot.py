@@ -1,21 +1,26 @@
 from telegram.ext import (Updater, ConversationHandler, CommandHandler, CallbackQueryHandler,
                             MessageHandler, filters)
-from telegram import KeyboardButton, ReplyKeyboardMarkup, ParseMode
+from telegram import (KeyboardButton, ReplyKeyboardMarkup, ParseMode, InlineKeyboardButton,
+                        InlineKeyboardMarkup)
 from stages import Stages
 from ads import Ads
 from adTypes import AdTypes
+from copy import deepcopy
 import botDialogs
 import logging
 import uuid
+from html import escape
 
 class Sneakerbot(object):
-    def __init__(self, bot_token):
+    def __init__(self, bot_token, channel_id):
         # Data structures to keep track of users' activities
         self.user_stage = {} # Users dictionary -> {username : state}
 
         # Save all the ads
         self.ads = []
         self.pending_ads = {}
+
+        self.channel_id = channel_id
 
         # Enable logging
         logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -37,14 +42,15 @@ class Sneakerbot(object):
         # Register the user
         self.user_stage[user.id] = Stages.MENU
 
-        self.set_keyboard(user, update)
+        self.set_keyboard(user, update, bot)
 
     def get_keyboards(self):
         keyboards = {}
 
         keyboards[Stages.MENU] = (botDialogs.KEYBOARD_TEXTS['menu_dialog'], [  # Menu keyboard
             [KeyboardButton("Crea annuncio"),
-            KeyboardButton("I miei annunci")]
+            KeyboardButton("I miei annunci"),
+            KeyboardButton("Rimuovi un annuncio")]
         ])
         keyboards[Stages.AD_CONFIRM] = (botDialogs.KEYBOARD_TEXTS['ad_insert_confirm'], [
             [KeyboardButton("Confermo"),
@@ -75,25 +81,105 @@ class Sneakerbot(object):
 
         return keyboards
 
-    def set_keyboard(self, user, update):
+    def generate_delete_keyboard(self, update, context):
+        message = update.message
+        user = message.from_user
+        chat_id = message.chat_id
+        bot = context.bot
+
+        if user.id not in self.user_stage.keys(): # Check user
+            bot.send_message(chat_id, botDialogs.DIALOGS['need_reset'])
+            return
+
+        self.user_stage[user.id] = Stages.DELETE_AD
+
+        kb = []
+        my_ads = self.get_ads_by_user(user)
+
+        ndx = 0
+        buttons = []
+        # Build a keyboard with 3 ads in the same row
+        for ad in my_ads:
+            buttons.append(InlineKeyboardButton(ad.shoe_name, callback_data=ad.id))
+            ndx=ndx+1
+            if ndx == 3:
+                kb.append(buttons)
+                ndx = 0
+                buttons = []
+        if buttons:
+            kb.append(buttons)
+
+        reply_markup = InlineKeyboardMarkup(kb)
+
+        update.message.reply_text(botDialogs.KEYBOARD_TEXTS['delete_ad'], reply_markup=reply_markup)
+
+        if len(my_ads) == 0:
+            bot.send_message(chat_id, botDialogs.DIALOGS['no_ads_error'])
+
+    def get_ad_by_id(self, ad_id):
+        for ad in self.ads:
+            if ad.id == ad_id:
+                return ad
+
+    def remove_from_channel(self, bot, ad):
+        mess_id = ad.message_id
+        if ad.type == AdTypes.BUY:
+            bot.edit_message_text(text="<i>Annuncio rimosso</i>", chat_id=self.channel_id, message_id=mess_id, parse_mode=ParseMode.HTML)
+        else:
+            bot.edit_message_caption(caption="<i>Non più disponibile</i>", chat_id=self.channel_id, message_id=mess_id, parse_mode=ParseMode.HTML)
+
+    def delete_ad(self, update, context):
+        query = update.callback_query
+        chat_id = query.message.chat_id
+        user = query.from_user
+        bot = context.bot
+
+        if user.id not in self.user_stage.keys(): # Check user
+            bot.send_message(chat_id, botDialogs.DIALOGS['need_reset'])
+            return
+
+        if self.user_stage[user.id] != Stages.DELETE_AD:
+            bot.send_message(chat_id, botDialogs.DIALOGS['command_not_valid'])
+            return
+
+        selected_ad = self.get_ad_by_id(query.data)
+        self.remove_from_channel(bot, selected_ad)
+
+        self.ads = list(filter(lambda x: x.id != query.data, self.ads))
+
+        self.logger.info("User %s deleted Ad with ID %s", user.name, query.data)
+
+        self.user_stage[user.id] = Stages.MENU
+        self.set_keyboard(user, update, bot, chat_id)
+
+    def set_keyboard(self, user, update, bot, chat_id=None):
+        if user.id not in self.user_stage.keys(): # Check user
+            bot.send_message(chat_id, botDialogs.DIALOGS['need_reset'])
+            return
+
         # Get current user stage and respective keyboard
         current_stage = self.user_stage[user.id]
         keyboard = self.get_keyboards()[current_stage]
 
         # Apply keyboard
         reply_markup = ReplyKeyboardMarkup(keyboard=keyboard[1], resize_keyboard=True, one_time_keyboard=True)
-        update.message.reply_text(text=keyboard[0], reply_markup=reply_markup)
+        if update.message:
+            update.message.reply_text(text=keyboard[0], reply_markup=reply_markup)
+        else:
+            bot.send_message(chat_id=chat_id, text=keyboard[0], reply_markup=reply_markup)
 
     def get_handlers(self):
         handlers = []
         handlers.append(CommandHandler("start", self.start))
         handlers.append(MessageHandler(filters.Filters.regex(r'Crea annuncio'), self.new_ads))
         handlers.append(MessageHandler(filters.Filters.regex(r'I miei annunci'), self.my_ads))
+        handlers.append(MessageHandler(filters.Filters.regex(r'Rimuovi un annuncio'), self.generate_delete_keyboard))
         handlers.append(MessageHandler(filters.Filters.regex(r'Reset'), self.reset))
         handlers.append(CommandHandler("reset", self.reset))
         handlers.append(MessageHandler(filters.Filters.regex(r'Confermo'), self.confirm_operation))
         handlers.append(MessageHandler(filters.Filters.text, self.text_handle))
         handlers.append(MessageHandler(filters.Filters.photo, self.image_handler))
+        handlers.append(CallbackQueryHandler(self.delete_ad))
 
         return handlers
 
@@ -106,7 +192,7 @@ class Sneakerbot(object):
         self.logger.info("User %s aborted his ad, going back to menu...", user.name)
 
         self.user_stage[user.id] = Stages.MENU
-        self.set_keyboard(user, update)
+        self.set_keyboard(user, update, bot)
 
     def my_ads(self, update, context):
         message = update.message
@@ -116,11 +202,14 @@ class Sneakerbot(object):
 
         self.logger.info("Sending ads info to %s", user.name)
 
-        my_ads = filter(lambda x: x.user == user.id, self.ads)
+        my_ads = self.get_ads_by_user(user)
         for a in my_ads:
             self.send_ad(bot, chat_id, a, user, True)
+        self.set_keyboard(user, update, bot)
 
-        self.set_keyboard(user, update)
+    def get_ads_by_user(self, user):
+        my_ads = filter(lambda x: x.user == user.id, self.ads)
+        return list(my_ads)
 
     def confirm_operation(self, update, context):
         message = update.message
@@ -150,7 +239,7 @@ class Sneakerbot(object):
             return
 
         self.user_stage[user.id] = Stages.AD_TYPE_SELECT
-        self.set_keyboard(user, update)
+        self.set_keyboard(user, update, bot)
 
     def new_ads(self, update, context):
         message = update.message
@@ -166,7 +255,7 @@ class Sneakerbot(object):
         # Send the notices about posting an ad
         bot.send_message(chat_id, botDialogs.DIALOGS['create_ad_info'])
         # Set the correct keyboard
-        self.set_keyboard(user, update)
+        self.set_keyboard(user, update, bot)
 
         self.logger.info("User %s is creating a new ad", user.name)
 
@@ -183,7 +272,7 @@ class Sneakerbot(object):
         self.user_stage[user.id] = Stages.REGION_SELECT
 
         # Set the correct keyboard
-        self.set_keyboard(user, update)
+        self.set_keyboard(user, update, bot)
 
     def insert_ad(self, update, context):
         message = update.message
@@ -193,14 +282,37 @@ class Sneakerbot(object):
 
         bot.send_message(chat_id, botDialogs.DIALOGS['ad_success'])
 
+        # Back to the menu
+        self.user_stage[user.id] = Stages.MENU
+        self.set_keyboard(user, update, bot)
+
+        self.logger.info("User %s confirmed his Ad", user.name)
+
+        sent_mess_id = self.post_to_channel(update, context, self.pending_ads[user.id])
+
+        # Save message id in case i want to modify the message
+        self.pending_ads[user.id].message_id = sent_mess_id
+
         # Insert the ad
         self.ads.append(self.pending_ads[user.id])
 
-        # Back to the menu
-        self.user_stage[user.id] = Stages.MENU
-        self.set_keyboard(user, update)
+    def post_to_channel(self, update, context, ad):
+        message = update.message
+        user = message.from_user
+        chat_id = message.chat_id
+        bot = context.bot
 
-        self.logger.info("User %s confirmed his Ad", user.name)
+        self.logger.info("Posting Ad %s on the channel", ad.id)
+
+        caption = self.format_ad(ad, user)
+
+        if ad.type is AdTypes.BUY:
+            sent_message = bot.send_message(chat_id=self.channel_id, text=caption, parse_mode=ParseMode.MARKDOWN)
+        elif ad.type is AdTypes.SELL:
+            sent_message = bot.send_photo(chat_id=self.channel_id, photo=ad.photo, caption=caption,
+                            parse_mode=ParseMode.MARKDOWN)
+
+        return sent_message.message_id
 
     def text_handle(self, update, context):
         message = update.message
@@ -223,7 +335,7 @@ class Sneakerbot(object):
             else:
                 print(message.text)
                 bot.send_message(chat_id, botDialogs.DIALOGS['type_not_valid'])
-                set_keyboard(user, update)
+                set_keyboard(user, update, bot)
             return
 
         # Region selection
@@ -250,7 +362,7 @@ class Sneakerbot(object):
                 self.pending_ads[user.id].number = int(message.text)
                 self.logger.info("User %s inserted shoe number: %d", user.name, int(message.text))
                 self.user_stage[user.id] = Stages.CONDITION_SELECTION
-                self.set_keyboard(user, update)
+                self.set_keyboard(user, update, bot)
             return
 
         # Condition selection
@@ -277,7 +389,7 @@ class Sneakerbot(object):
                 elif self.pending_ads[user.id].type is AdTypes.BUY :
                     self.send_ad_preview(update, context)
                     self.user_stage[user.id] = Stages.AD_INSERT
-                    self.set_keyboard(user, update)
+                    self.set_keyboard(user, update, bot)
             return
 
     def send_ad_preview(self, update, context):
@@ -317,7 +429,7 @@ class Sneakerbot(object):
             self.pending_ads[user.id].photo = message.photo[0].file_id
             self.send_ad_preview(update, context)
             self.user_stage[user.id] = Stages.AD_INSERT
-            self.set_keyboard(user, update)
+            self.set_keyboard(user, update, bot)
 
         return
 

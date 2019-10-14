@@ -4,7 +4,9 @@ DIALOGS = {
     'digit_error': 'Perfavore, inserisci un numero',
     'photo_not_requested': 'Non dovresti mandarmi una foto in questo momento...',
     'ad_success': 'Annuncio inserito! Se ritenuto idoneo dovresti vederlo tra pochi minuti sul canale',
-    'type_not_valid': 'Perfavore, selezionare un tipo di annuncio valido'
+    'type_not_valid': 'Perfavore, selezionare un tipo di annuncio valido',
+    'no_ads_error': 'Oops, non hai annunci da rimuovere, premi /reset per tornare al menu',
+    'command_not_valid' : 'Comando non permesso in questo momento'
 }
 
 KEYBOARD_TEXTS = {
@@ -18,5 +20,6 @@ KEYBOARD_TEXTS = {
     'price_selection_buy': 'Quanto è il tuo budget?',
     'photo_insertion': 'Manda la foto della tua scarpa',
     'ad_complete_confirm': 'Annuncio creato, vuoi postarlo?',
-    'ad_type_select': 'Di che tipo di annuncio si tratta?'
+    'ad_type_select': 'Di che tipo di annuncio si tratta?',
+    'delete_ad': 'Seleziona l\'annuncio da rimuovere'
 }

@@ -11,3 +11,4 @@ class Ads(object):
         self.price = -1
         self.photo = ""
         self.id = str(uuid.uuid4())
+        self.message_id = ""

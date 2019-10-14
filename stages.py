@@ -12,3 +12,4 @@ class Stages(Enum):
     PRICE_SELECTION = 'price_selection'
     PHOTO_INSERTION = 'photo_insertion'
     AD_INSERT = 'ad_insert'
+    DELETE_AD = 'delete_ad'
