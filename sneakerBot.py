@@ -366,11 +366,13 @@ class Sneakerbot(object):
 
         # Shoe number selection
         if self.user_stage[user.id] is Stages.NUMBER_SELECTION:
-            if not message.text.isdigit():
+            try:
+                float(message.text)
+            except ValueError:
                 bot.send_message(chat_id, botDialogs.DIALOGS['digit_error'])
             else:
-                self.pending_ads[user.id].number = int(message.text)
-                self.logger.info("User %s inserted shoe number: %d", user.name, int(message.text))
+                self.pending_ads[user.id].number = float(message.text)
+                self.logger.info("User %s inserted shoe number: %f", user.name, float(message.text))
                 self.user_stage[user.id] = Stages.CONDITION_SELECTION
                 self.set_keyboard(user, update, bot)
             return
