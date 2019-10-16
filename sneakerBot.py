@@ -15,6 +15,12 @@ from html import escape
 
 class Sneakerbot(object):
     def __init__(self, bot_token, channel_id, save_file):
+
+        # Enable logging
+        logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                            level=logging.INFO)
+        self.logger = logging.getLogger(__name__)
+
         # Data structures to keep track of users' activities
         self.user_stage = {} # Users dictionary -> {username : state}
 
@@ -25,11 +31,6 @@ class Sneakerbot(object):
         self.ads = []
         self.load_save_file()
         self.pending_ads = {}
-
-        # Enable logging
-        logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                            level=logging.INFO)
-        self.logger = logging.getLogger(__name__)
 
         # Init bot tools to retrieve data
         self.updater = Updater(bot_token, use_context=True)
@@ -207,6 +208,9 @@ class Sneakerbot(object):
 
         if user.id not in self.user_stage.keys(): # Check user
             bot.send_message(chat_id, botDialogs.DIALOGS['need_reset'])
+            return
+        elif self.user_stage[user.id] != Stages.MENU:
+            bot.send_message(chat_id, botDialogs.DIALOGS['command_not_valid'])
             return
 
         self.logger.info("Sending ads info to %s", user.name)
@@ -414,8 +418,6 @@ class Sneakerbot(object):
         self.send_ad(bot, chat_id, ad, user)
 
     def send_ad(self, bot, chat_id, ad, user, review=False):
-
-
         caption = self.format_ad(ad, user, review)
 
         if ad.type is AdTypes.BUY:
@@ -449,18 +451,30 @@ class Sneakerbot(object):
         ad = self.pending_ads[user.id]
         return self.format_ad(ad, user, review)
 
+    def format_number(self, number):
+        try:
+            float(number)
+        except ValueError:
+            self.logger.info("Value Error")
+            return "Err"
+
+        if float(number) == float(int(number)):
+            return str(int(number))
+        else:
+            return str(number)
+
     def format_ad(self, ad, user, review=False):
         if ad.type is AdTypes.SELL:
             caption = 'Vendo <b>' + escape(ad.shoe_name) + '</b>'
             caption = caption + '\nLuogo: ' + escape(ad.region)
-            caption = caption + '\nCondizione: ' + escape(ad.condition) + ' | ' + escape(str(ad.price)) + '€'
-            caption = caption +'\nNumero: '+str(ad.number)
+            caption = caption + '\nCondizione: ' + escape(ad.condition) + ' | ' + self.format_number(ad.price) + '€'
+            caption = caption +'\nNumero: ' + self.format_number(ad.number)
             caption = caption + '\nContattare: ' + escape(user.name)
         else:
             caption = 'Cerco <b>' + escape(ad.shoe_name) + '</b>'
             caption = caption + '\nLuogo: ' + escape(ad.region)
-            caption = caption + '\nCondizione: ' + escape(ad.condition) + ' | ' + 'Budget: ' + str(ad.price) + '€'
-            caption = caption +'\nNumero: '+str(ad.number)
+            caption = caption + '\nCondizione: ' + escape(ad.condition) + ' | ' + 'Budget: ' + self.format_number(ad.price) + '€'
+            caption = caption +'\nNumero: ' + self.format_number(ad.number)
             caption = caption + '\nContattare: ' + escape(user.name)
 
         if review:
@@ -473,10 +487,13 @@ class Sneakerbot(object):
             pickle.dump(self.ads, filename)
 
     def load_save_file(self):
-        if os.stat(self.save_file).st_size != 0:
-            with open(self.save_file, 'rb') as filename:
-                self.ads = pickle.load(filename)
-
+        try:
+            if os.stat(self.save_file).st_size != 0:
+                with open(self.save_file, 'rb') as filename:
+                    self.ads = pickle.load(filename)
+        except FileNotFoundError:
+            self.logger.info("No save file found")
+            self.ads = []
     def run(self):
         # Start the bot
         self.updater.start_polling()
