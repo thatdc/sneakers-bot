@@ -8,19 +8,23 @@ from adTypes import AdTypes
 from copy import deepcopy
 import botDialogs
 import logging
+import pickle
+import os
 import uuid
 from html import escape
 
 class Sneakerbot(object):
-    def __init__(self, bot_token, channel_id):
+    def __init__(self, bot_token, channel_id, save_file):
         # Data structures to keep track of users' activities
         self.user_stage = {} # Users dictionary -> {username : state}
 
+        self.channel_id = channel_id
+        self.save_file = save_file
+
         # Save all the ads
         self.ads = []
+        self.load_save_file()
         self.pending_ads = {}
-
-        self.channel_id = channel_id
 
         # Enable logging
         logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -146,6 +150,7 @@ class Sneakerbot(object):
         self.remove_from_channel(bot, selected_ad)
 
         self.ads = list(filter(lambda x: x.id != query.data, self.ads))
+        self.update_save_file()
 
         self.logger.info("User %s deleted Ad with ID %s", user.name, query.data)
 
@@ -200,12 +205,16 @@ class Sneakerbot(object):
         chat_id = message.chat_id
         bot = context.bot
 
+        if user.id not in self.user_stage.keys(): # Check user
+            bot.send_message(chat_id, botDialogs.DIALOGS['need_reset'])
+            return
+
         self.logger.info("Sending ads info to %s", user.name)
 
         my_ads = self.get_ads_by_user(user)
         for a in my_ads:
             self.send_ad(bot, chat_id, a, user, True)
-        self.set_keyboard(user, update, bot)
+        self.set_keyboard(user, update, bot, chat_id)
 
     def get_ads_by_user(self, user):
         my_ads = filter(lambda x: x.user == user.id, self.ads)
@@ -295,6 +304,7 @@ class Sneakerbot(object):
 
         # Insert the ad
         self.ads.append(self.pending_ads[user.id])
+        self.update_save_file()
 
     def post_to_channel(self, update, context, ad):
         message = update.message
@@ -307,10 +317,10 @@ class Sneakerbot(object):
         caption = self.format_ad(ad, user)
 
         if ad.type is AdTypes.BUY:
-            sent_message = bot.send_message(chat_id=self.channel_id, text=caption, parse_mode=ParseMode.MARKDOWN)
+            sent_message = bot.send_message(chat_id=self.channel_id, text=caption, parse_mode=ParseMode.HTML)
         elif ad.type is AdTypes.SELL:
             sent_message = bot.send_photo(chat_id=self.channel_id, photo=ad.photo, caption=caption,
-                            parse_mode=ParseMode.MARKDOWN)
+                            parse_mode=ParseMode.HTML)
 
         return sent_message.message_id
 
@@ -407,10 +417,10 @@ class Sneakerbot(object):
         caption = self.format_ad(ad, user, review)
 
         if ad.type is AdTypes.BUY:
-            bot.send_message(chat_id=chat_id, text=caption, parse_mode=ParseMode.MARKDOWN)
+            bot.send_message(chat_id=chat_id, text=caption, parse_mode=ParseMode.HTML)
         elif ad.type is AdTypes.SELL:
             bot.send_photo(chat_id=chat_id, photo=ad.photo, caption=caption,
-                            parse_mode=ParseMode.MARKDOWN)
+                            parse_mode=ParseMode.HTML)
 
     def image_handler(self, update, context):
         message = update.message
@@ -439,22 +449,31 @@ class Sneakerbot(object):
 
     def format_ad(self, ad, user, review=False):
         if ad.type is AdTypes.SELL:
-            caption = 'Vendo *' + ad.shoe_name + '*'
-            caption = caption + '\nLuogo: ' + ad.region
-            caption = caption + '\nCondizione: ' + ad.condition + ' | ' + str(ad.price) + '€'
+            caption = 'Vendo <b>' + escape(ad.shoe_name) + '</b>'
+            caption = caption + '\nLuogo: ' + escape(ad.region)
+            caption = caption + '\nCondizione: ' + escape(ad.condition) + ' | ' + escape(str(ad.price)) + '€'
             caption = caption +'\nNumero: '+str(ad.number)
-            caption = caption + '\nContattare: ' + user.name
+            caption = caption + '\nContattare: ' + escape(user.name)
         else:
-            caption = 'Cerco *' + ad.shoe_name + '*'
-            caption = caption + '\nLuogo: ' + ad.region
-            caption = caption + '\nCondizione: ' + ad.condition + ' | ' + 'Budget: ' + str(ad.price) + '€'
+            caption = 'Cerco <b>' + escape(ad.shoe_name) + '</b>'
+            caption = caption + '\nLuogo: ' + escape(ad.region)
+            caption = caption + '\nCondizione: ' + escape(ad.condition) + ' | ' + 'Budget: ' + str(ad.price) + '€'
             caption = caption +'\nNumero: '+str(ad.number)
-            caption = caption + '\nContattare: ' + user.name
+            caption = caption + '\nContattare: ' + escape(user.name)
 
         if review:
             caption = caption + '\nID: ' + ad.id
 
         return caption
+
+    def update_save_file(self):
+        with open(self.save_file, 'wb') as filename:
+            pickle.dump(self.ads, filename)
+
+    def load_save_file(self):
+        if os.stat(self.save_file).st_size != 0:
+            with open(self.save_file, 'rb') as filename:
+                self.ads = pickle.load(filename)
 
     def run(self):
         # Start the bot

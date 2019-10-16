@@ -5,3 +5,6 @@ _*
 
 # Config file #
 config.py
+
+# Data fies
+*.dat
