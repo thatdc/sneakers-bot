@@ -12,6 +12,8 @@ import pickle
 import os
 import uuid
 from html import escape
+from validate import *
+from generator import *
 
 class Sneakerbot(object):
     def __init__(self, bot_token, channel_id, save_file):
@@ -72,9 +74,7 @@ class Sneakerbot(object):
             [KeyboardButton("Val d'Aosta"), KeyboardButton("Veneto")],
         ])
         # Also this
-        keyboards[Stages.CONDITION_SELECTION] = (botDialogs.KEYBOARD_TEXTS['condition_selection'],[
-            [KeyboardButton("Nuove"), KeyboardButton("Usate")]
-        ])
+        keyboards[Stages.CONDITION_SELECTION] = (botDialogs.KEYBOARD_TEXTS['condition_selection'], generate_conditions())
         keyboards[Stages.AD_INSERT] = (botDialogs.KEYBOARD_TEXTS['ad_complete_confirm'], [
             [KeyboardButton("Confermo"),
             KeyboardButton("Reset")]
@@ -82,6 +82,18 @@ class Sneakerbot(object):
         keyboards[Stages.AD_TYPE_SELECT] = (botDialogs.KEYBOARD_TEXTS['ad_type_select'], [
             [KeyboardButton("Cerco"),
             KeyboardButton("Vendo")]
+        ])
+        keyboards[Stages.BRAND_SELECTION] = (botDialogs.KEYBOARD_TEXTS['brand_selection'], [
+            [KeyboardButton("Jordan"),
+            KeyboardButton("Nike"),
+            KeyboardButton("Adidas")],
+            [KeyboardButton("Altro")
+            ]
+        ])
+        keyboards[Stages.NUMBER_SELECTION] = (botDialogs.KEYBOARD_TEXTS['number_selection'], generate_sizes())
+        keyboards[Stages.NOTE_INSERT_REQ] = (botDialogs.KEYBOARD_TEXTS['note_insert_req'], [
+            [KeyboardButton("SI"),
+            KeyboardButton("NO")]
         ])
 
         return keyboards
@@ -356,8 +368,21 @@ class Sneakerbot(object):
         if self.user_stage[user.id] is Stages.REGION_SELECT:
             self.pending_ads[user.id].region = message.text # Insert region name
             self.logger.info("User %s selected region %s for its Ad", user.name, message.text)
-            self.user_stage[user.id] = Stages.SHOE_NAME_SELECTION # Change stage
-            bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['shoe_name_selection']) # Prompt selection text
+            self.user_stage[user.id] = Stages.BRAND_SELECTION # Change stage
+            self.set_keyboard(user, update, bot)
+            return
+
+        # Brand selection
+        if self.user_stage[user.id] is Stages.BRAND_SELECTION:
+            if validate_brand(message.text):
+                self.pending_ads[user.id].brand = message.text # Insert brand name
+                self.logger.info("User %s selected brand %s for its Ad", user.name, message.text)
+                self.user_stage[user.id] = Stages.SHOE_NAME_SELECTION
+                bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['shoe_name_selection'])
+            else:
+                bot.send_message(chat_id, botDialogs.DIALOGS['brand_not_valid'])
+                self.set_keyboard(user, update, bot)
+                #TODO: implement altro
             return
 
         # Shoe name insertion
@@ -365,19 +390,18 @@ class Sneakerbot(object):
             self.pending_ads[user.id].shoe_name = message.text
             self.logger.info("User %s inserted shoe name: %s", user.name, message.text)
             self.user_stage[user.id] = Stages.NUMBER_SELECTION # Change stage
-            bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['number_selection']) # Prompt selection text
+            self.set_keyboard(user, update, bot)
             return
 
         # Shoe number selection
         if self.user_stage[user.id] is Stages.NUMBER_SELECTION:
-            try:
-                float(message.text)
-            except ValueError:
-                bot.send_message(chat_id, botDialogs.DIALOGS['digit_error'])
-            else:
+            if validate_size(message.text):
                 self.pending_ads[user.id].number = float(message.text)
                 self.logger.info("User %s inserted shoe number: %f", user.name, float(message.text))
                 self.user_stage[user.id] = Stages.CONDITION_SELECTION
+                self.set_keyboard(user, update, bot)
+            else:
+                bot.send_message(chat_id, botDialogs.DIALOGS['shoe_size_error'])
                 self.set_keyboard(user, update, bot)
             return
 
@@ -392,6 +416,28 @@ class Sneakerbot(object):
                 bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['price_selection_buy'])
             return
 
+        # Notes confirm
+        if self.user_stage[user.id] is Stages.NOTE_INSERT_REQ:
+            if message.text == 'SI':
+                self.user_stage[user.id] = Stages.NOTE_INSERT
+                bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['note_insert'])
+            elif message.text == 'NO':
+                self.user_stage[user.id] = Stages.AD_INSERT
+                self.send_ad_preview(update, context)
+                self.set_keyboard(user, update, bot)
+            else:
+                bot.send_message(chat_id, botDialogs.DIALOGS['not_valid_choice'])
+                self.set_keyboard(user, update, bot)
+            return
+
+        # Notes insertion
+        if self.user_stage[user.id] is Stages.NOTE_INSERT:
+            self.pending_ads[user.id].notes = message.text
+            self.send_ad_preview(update, context)
+            self.user_stage[user.id] = Stages.AD_INSERT
+            self.set_keyboard(user, update, bot)
+            return
+
         # Price selection
         if self.user_stage[user.id] is Stages.PRICE_SELECTION:
             if not message.text.isdigit():
@@ -403,8 +449,7 @@ class Sneakerbot(object):
                     self.user_stage[user.id] = Stages.PHOTO_INSERTION
                     bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['photo_insertion'])
                 elif self.pending_ads[user.id].type is AdTypes.BUY :
-                    self.send_ad_preview(update, context)
-                    self.user_stage[user.id] = Stages.AD_INSERT
+                    self.user_stage[user.id] = Stages.NOTE_INSERT_REQ
                     self.set_keyboard(user, update, bot)
             return
 
@@ -441,8 +486,7 @@ class Sneakerbot(object):
         else:
             self.logger.info("User %s sent his shoe photo: id->%s", user.name, message.photo[0].file_id)
             self.pending_ads[user.id].photo = message.photo[0].file_id
-            self.send_ad_preview(update, context)
-            self.user_stage[user.id] = Stages.AD_INSERT
+            self.user_stage[user.id] = Stages.NOTE_INSERT_REQ
             self.set_keyboard(user, update, bot)
 
         return
@@ -465,16 +509,20 @@ class Sneakerbot(object):
 
     def format_ad(self, ad, user, review=False):
         if ad.type is AdTypes.SELL:
-            caption = 'Vendo <b>' + escape(ad.shoe_name) + '</b>'
+            caption = 'Vendo <b>' + escape(ad.brand) + ' ' + escape(ad.shoe_name) + '</b>'
             caption = caption + '\nLuogo: ' + escape(ad.region)
-            caption = caption + '\nCondizione: ' + escape(ad.condition) + ' | ' + self.format_number(ad.price) + '€'
-            caption = caption +'\nNumero: ' + self.format_number(ad.number)
+            caption = caption + '\nCondizione: ' + escape(ad.condition) + ' | Prezzo: ' + self.format_number(ad.price) + '€'
+            caption = caption + '\nTaglia: ' + self.format_number(ad.number)
+            if ad.notes != "":
+                caption = caption + "\nNote: " + '<i>' + escape(ad.notes) + '</i>'
             caption = caption + '\nContattare: ' + escape(user.name)
         else:
-            caption = 'Cerco <b>' + escape(ad.shoe_name) + '</b>'
+            caption = 'Cerco <b>' + escape(ad.brand) + ' ' + escape(ad.shoe_name) + '</b>'
             caption = caption + '\nLuogo: ' + escape(ad.region)
             caption = caption + '\nCondizione: ' + escape(ad.condition) + ' | ' + 'Budget: ' + self.format_number(ad.price) + '€'
-            caption = caption +'\nNumero: ' + self.format_number(ad.number)
+            caption = caption +'\nTaglia: ' + self.format_number(ad.number)
+            if ad.notes != "":
+                caption = caption + "\nNote: " + '<i>' + escape(ad.notes) + '</i>'
             caption = caption + '\nContattare: ' + escape(user.name)
 
         if review:

@@ -5,6 +5,7 @@ class Ads(object):
         self.user = user
         self.type = None
         self.region = ""
+        self.brand = ""
         self.shoe_name = ""
         self.number = -1
         self.condition = ""
@@ -12,3 +13,4 @@ class Ads(object):
         self.photo = ""
         self.id = str(uuid.uuid4())
         self.message_id = ""
+        self.notes = ""
