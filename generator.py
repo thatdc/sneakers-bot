@@ -1,6 +1,10 @@
 from telegram import KeyboardButton
 
 CONDITIONS = ['DSWT', 'VNDS', '9/10', '8/10', '7/10', '6/10', '5/10', '4/10', '3/10', '2/10', '1/10']
+REGIONS = ['Abruzzo', 'Basilicata', 'Calabria', 'Campania', 'Emilia-Romagna', 'Friuli-Venezia Giulia', 'Lazio', 'Liguria',
+            'Lombardia', 'Marche', 'Molise', 'Piemonte', 'Puglia', 'Sardegna', 'Sicilia', 'Toscana', 'Trentino-Alto Adige', 
+            'Umbria', 'Valle d\'Aosta', 'Veneto']
+BRANDS = ['Adidas', 'Jordan', 'Nike', 'Altro']
 
 def generate_sizes():
     size = 4
@@ -37,3 +41,9 @@ def generate_kb(array, row_lenght):
 
 def generate_conditions():
     return generate_kb(CONDITIONS, 4)
+
+def generate_regions():
+    return generate_kb(REGIONS, 3)
+
+def generate_brands():
+    return generate_kb(BRANDS, 3)

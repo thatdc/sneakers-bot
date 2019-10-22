@@ -63,17 +63,7 @@ class Sneakerbot(object):
             [KeyboardButton("Confermo"),
             KeyboardButton("Reset")]
         ])
-        # Do this shit somehow better
-        keyboards[Stages.REGION_SELECT] = (botDialogs.KEYBOARD_TEXTS['region_select'], [
-            [KeyboardButton("Abruzzo"), KeyboardButton("Basilicata"), KeyboardButton("Calabria")],
-            [KeyboardButton("Campania"), KeyboardButton("Emilia Romagna"), KeyboardButton("Friuli-Venezia Giulia")],
-            [KeyboardButton("Lazio"), KeyboardButton("Liguria"), KeyboardButton("Lombardia")],
-            [KeyboardButton("Marche"), KeyboardButton("Molise"), KeyboardButton("Piemonte")],
-            [KeyboardButton("Puglia"), KeyboardButton("Sardegna"), KeyboardButton("Sicilia")],
-            [KeyboardButton("Toscana"), KeyboardButton("Trentino-Alto Adige"), KeyboardButton("Umbria")],
-            [KeyboardButton("Val d'Aosta"), KeyboardButton("Veneto")],
-        ])
-        # Also this
+        keyboards[Stages.REGION_SELECT] = (botDialogs.KEYBOARD_TEXTS['region_select'], generate_regions())
         keyboards[Stages.CONDITION_SELECTION] = (botDialogs.KEYBOARD_TEXTS['condition_selection'], generate_conditions())
         keyboards[Stages.AD_INSERT] = (botDialogs.KEYBOARD_TEXTS['ad_complete_confirm'], [
             [KeyboardButton("Confermo"),
@@ -83,13 +73,7 @@ class Sneakerbot(object):
             [KeyboardButton("Cerco"),
             KeyboardButton("Vendo")]
         ])
-        keyboards[Stages.BRAND_SELECTION] = (botDialogs.KEYBOARD_TEXTS['brand_selection'], [
-            [KeyboardButton("Jordan"),
-            KeyboardButton("Nike"),
-            KeyboardButton("Adidas")],
-            [KeyboardButton("Altro")
-            ]
-        ])
+        keyboards[Stages.BRAND_SELECTION] = (botDialogs.KEYBOARD_TEXTS['brand_selection'], generate_brands())
         keyboards[Stages.NUMBER_SELECTION] = (botDialogs.KEYBOARD_TEXTS['number_selection'], generate_sizes())
         keyboards[Stages.NOTE_INSERT_REQ] = (botDialogs.KEYBOARD_TEXTS['note_insert_req'], [
             [KeyboardButton("SI"),
