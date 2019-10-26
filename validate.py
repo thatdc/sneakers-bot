@@ -16,6 +16,7 @@ def validate_condition(condition):
 def validate_size(size):
     pieces = size.split(".")
     try:
+        flt = float(size)
         if int(pieces[1]) == 0 or int(pieces[1]) == 5:
             if pieces[0].isdigit():
                 return True

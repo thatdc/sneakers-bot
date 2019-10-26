@@ -5,6 +5,7 @@ REGIONS = ['Abruzzo', 'Basilicata', 'Calabria', 'Campania', 'Emilia-Romagna', 'F
             'Lombardia', 'Marche', 'Molise', 'Piemonte', 'Puglia', 'Sardegna', 'Sicilia', 'Toscana', 'Trentino-Alto Adige', 
             'Umbria', 'Valle d\'Aosta', 'Veneto']
 BRANDS = ['Adidas', 'Jordan', 'Nike', 'Altro']
+BOOL_CHOICE = ['SI', 'NO']
 
 def generate_sizes():
     size = 4
@@ -47,3 +48,6 @@ def generate_regions():
 
 def generate_brands():
     return generate_kb(BRANDS, 3)
+
+def generate_bool_choice():
+    return generate_kb(BOOL_CHOICE, 2)

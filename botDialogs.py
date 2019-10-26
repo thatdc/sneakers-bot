@@ -1,6 +1,7 @@
 DIALOGS = {
     'create_ad_info': 'Non vendere scarpe tarocche, e cose così insomma... Confermi?',
-    'need_reset': 'Utente non riconosciuto, o in stato non consistente, premi /reset per tornare al menu',
+    'need_reset': 'Utente non riconosciuto, o in stato non consistente, premi /reset per tornare al menu. Oppure, /start per iniziare ad usare il bot',
+    'need_start': 'Per iniziare ad usare il bot, digita /start',
     'digit_error': 'Perfavore, inserisci un numero',
     'shoe_size_error': 'Inserire una taglia tra quelle proposte',
     'photo_not_requested': 'Non dovresti mandarmi una foto in questo momento...',
@@ -9,7 +10,11 @@ DIALOGS = {
     'no_ads_error': 'Oops, non hai annunci da rimuovere, premi /reset per tornare al menu',
     'command_not_valid' : 'Comando non permesso in questo momento',
     'brand_not_valid': 'Il brand inserito non è valido, devi selezionare una delle opzioni proposte!',
-    'not_valid_choice': 'Perfavore, seleziona una delle opzioni proposte'
+    'not_valid_choice': 'Perfavore, seleziona una delle opzioni proposte',
+    'vote_registered': 'Grazie, il tuo feedback è stato registrato',
+    'autovote_error': 'Non puoi auto-valutarti!',
+    'user_not_found': 'Utente non trovato',
+    'username_not_found': '<b>ATTENZIONE</b> Non hai un username impostato, potrebbe non essere possibile per i tuoi clienti contattarti! Inseriscine uno dalle impostazioni di Telegram!'
 }
 
 KEYBOARD_TEXTS = {
@@ -27,5 +32,12 @@ KEYBOARD_TEXTS = {
     'delete_ad': 'Seleziona l\'annuncio da rimuovere',
     'brand_selection': 'Seleziona il brand',
     'note_insert': 'Scrivi le tue note',
-    'note_insert_req': 'Desideri aggiungere delle note?'
+    'note_insert_req': 'Desideri aggiungere delle note?',
+    'set_availability': 'La sneaker è già disponibile?',
+    'store_insertion': 'Da quale negozio l\'hai acquistata?',
+    'set_shipping': 'Spedisci?',
+    'accept_paypal': 'Accetti Paypal Beni e Servizi?',
+    'insert_feedback': 'Inserisci l\'username, comprensivo di @, dell\'utente che vuoi valutare',
+    'evaluate_feedback': 'Come valuti l\'esperienza con questo utente?',
+    'custom_brand_insertion': 'Inserisci il nome del brand'
 }

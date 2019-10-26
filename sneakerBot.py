@@ -14,9 +14,14 @@ import uuid
 from html import escape
 from validate import *
 from generator import *
+from user import User
+from feedback import Feedback
+import jsonpickle
+import json
+from copy import deepcopy
 
 class Sneakerbot(object):
-    def __init__(self, bot_token, channel_id, save_file):
+    def __init__(self, bot_token, channel_id, ads_save_file, user_save_file, feedback_save_file):
 
         # Enable logging
         logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -25,14 +30,24 @@ class Sneakerbot(object):
 
         # Data structures to keep track of users' activities
         self.user_stage = {} # Users dictionary -> {username : state}
+        self.feedbacking = {} # pending feedback -> {from : to}
 
         self.channel_id = channel_id
-        self.save_file = save_file
+        self.ads_save_file = ads_save_file
 
         # Save all the ads
         self.ads = []
-        self.load_save_file()
         self.pending_ads = {}
+        self.queue_ads = []
+
+        # Infos about users
+        self.user_list = []
+        self.feedback_list = []
+        self.user_save_file = user_save_file
+        self.feedback_save_file = feedback_save_file
+
+        # Load data
+        self.load_save_file()
 
         # Init bot tools to retrieve data
         self.updater = Updater(bot_token, use_context=True)
@@ -46,10 +61,65 @@ class Sneakerbot(object):
         user = update.message.from_user
         bot = context.bot
         self.logger.info("User %s started the conversation.", user.name)
+
         # Register the user
         self.user_stage[user.id] = Stages.MENU
+        self.add_user(user)
+
+        # Check username
+        if not user.username:
+            bot.send_message(update.message.chat_id, botDialogs.DIALOGS['username_not_found'], parse_mode=ParseMode.HTML)
 
         self.set_keyboard(user, update, bot)
+
+    def add_user(self, usr):
+        if usr.id not in [u.id for u in self.user_list]:
+            self.user_list.append(User(usr.id, usr.name, usr.full_name))
+            self.logger.info("User %s registered to the database", usr.name)
+        self.update_save_file(self.user_save_file, self.user_list)
+
+    def name_to_id(self, name):
+        for usr in self.user_list:
+            if usr.username == name:
+                return usr.id
+        raise Exception('Username not found')
+
+    def begin_feedback(self, update, context):
+        message = update.message
+        user = message.from_user
+        chat_id = message.chat_id
+        bot = context.bot
+
+        if user.id not in self.user_stage.keys(): # Check user
+            bot.send_message(chat_id, botDialogs.DIALOGS['need_reset'])
+            return
+
+        if self.user_stage[user.id] is not Stages.MENU:
+            bot.send_message(chat_id, botDialogs.DIALOGS['command_not_valid'])
+            return
+
+        self.user_stage[user.id] = Stages.INSERT_FEEDBACK
+        bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['insert_feedback'])
+
+    def vote(self, bot, message, user_target, value):
+        user = message.from_user
+        chat_id = message.chat_id
+
+        try:
+            if user.id not in [fb.from_id for fb in self.feedback_list if fb.to_id == self.name_to_id(user_target)]:
+                self.feedback_list.append(Feedback(user.id, self.name_to_id(user_target), value))
+            else:
+                for fb in self.feedback_list:
+                    if fb.from_id == user.id and fb.to_id == self.name_to_id(user_target):
+                        fb.value = value
+            self.update_save_file(self.feedback_save_file, self.feedback_list)
+            bot.send_message(chat_id, botDialogs.DIALOGS['vote_registered'])
+            self.logger.info("User %s registered his feedback for user %s with a value %d", user.name, user_target, value)
+        except Exception:
+            bot.send_message(chat_id, botDialogs.DIALOGS['user_not_found'])
+
+    def count_feedbacks(self, id, value):
+        return len([fb for fb in self.feedback_list if fb.to_id == id and fb.value == value])
 
     def get_keyboards(self):
         keyboards = {}
@@ -57,7 +127,8 @@ class Sneakerbot(object):
         keyboards[Stages.MENU] = (botDialogs.KEYBOARD_TEXTS['menu_dialog'], [  # Menu keyboard
             [KeyboardButton("Crea annuncio"),
             KeyboardButton("I miei annunci"),
-            KeyboardButton("Rimuovi un annuncio")]
+            KeyboardButton("Rimuovi un annuncio")],
+            [KeyboardButton("Valuta un utente")]
         ])
         keyboards[Stages.AD_CONFIRM] = (botDialogs.KEYBOARD_TEXTS['ad_insert_confirm'], [
             [KeyboardButton("Confermo"),
@@ -75,9 +146,13 @@ class Sneakerbot(object):
         ])
         keyboards[Stages.BRAND_SELECTION] = (botDialogs.KEYBOARD_TEXTS['brand_selection'], generate_brands())
         keyboards[Stages.NUMBER_SELECTION] = (botDialogs.KEYBOARD_TEXTS['number_selection'], generate_sizes())
-        keyboards[Stages.NOTE_INSERT_REQ] = (botDialogs.KEYBOARD_TEXTS['note_insert_req'], [
-            [KeyboardButton("SI"),
-            KeyboardButton("NO")]
+        keyboards[Stages.NOTE_INSERT_REQ] = (botDialogs.KEYBOARD_TEXTS['note_insert_req'], generate_bool_choice())
+        keyboards[Stages.SET_AVAILABILITY] = (botDialogs.KEYBOARD_TEXTS['set_availability'], generate_bool_choice())
+        keyboards[Stages.SET_SHIPPING] = (botDialogs.KEYBOARD_TEXTS['set_shipping'], generate_bool_choice())
+        keyboards[Stages.ACCEPT_PAYPAL] = (botDialogs.KEYBOARD_TEXTS['accept_paypal'], generate_bool_choice())
+        keyboards[Stages.EVALUATE_FEEDBACK] = (botDialogs.KEYBOARD_TEXTS['evaluate_feedback'], [
+            [KeyboardButton('Positiva'),
+            KeyboardButton('Negativa')]
         ])
 
         return keyboards
@@ -147,7 +222,7 @@ class Sneakerbot(object):
         self.remove_from_channel(bot, selected_ad)
 
         self.ads = list(filter(lambda x: x.id != query.data, self.ads))
-        self.update_save_file()
+        self.update_save_file(self.ads_save_file, self.ads)
 
         self.logger.info("User %s deleted Ad with ID %s", user.name, query.data)
 
@@ -176,6 +251,7 @@ class Sneakerbot(object):
         handlers.append(MessageHandler(filters.Filters.regex(r'Crea annuncio'), self.new_ads))
         handlers.append(MessageHandler(filters.Filters.regex(r'I miei annunci'), self.my_ads))
         handlers.append(MessageHandler(filters.Filters.regex(r'Rimuovi un annuncio'), self.generate_delete_keyboard))
+        handlers.append(MessageHandler(filters.Filters.regex(r'Valuta un utente'), self.begin_feedback))
         handlers.append(MessageHandler(filters.Filters.regex(r'Reset'), self.reset))
         handlers.append(CommandHandler("reset", self.reset))
         handlers.append(MessageHandler(filters.Filters.regex(r'Confermo'), self.confirm_operation))
@@ -185,11 +261,22 @@ class Sneakerbot(object):
 
         return handlers
 
+    def post_delayed_ad(self, context, ad, chat_id):
+        context.job_queue.run_once(self.post_to_channel, 15, context=(ad, chat_id))
+
+    def alarm(self, context):
+        job = context.job
+        context.bot.send_message(job.context, text='Beep!')
+
     def reset(self, update, context):
         message = update.message
         user = message.from_user
         chat_id = message.chat_id
         bot = context.bot
+
+        if user.id not in self.user_stage.keys(): # Check user
+            bot.send_message(chat_id, botDialogs.DIALOGS['need_start'])
+            return
 
         self.logger.info("User %s aborted his ad, going back to menu...", user.name)
 
@@ -297,20 +384,18 @@ class Sneakerbot(object):
 
         self.logger.info("User %s confirmed his Ad", user.name)
 
-        sent_mess_id = self.post_to_channel(update, context, self.pending_ads[user.id])
+        ad = deepcopy(self.pending_ads[user.id])
 
-        # Save message id in case i want to modify the message
-        self.pending_ads[user.id].message_id = sent_mess_id
+        # Call delayed posting
+        context.job_queue.run_once(self.post_to_channel, 20, context=(ad, chat_id, user))
 
-        # Insert the ad
-        self.ads.append(self.pending_ads[user.id])
-        self.update_save_file()
-
-    def post_to_channel(self, update, context, ad):
-        message = update.message
-        user = message.from_user
-        chat_id = message.chat_id
+    def post_to_channel(self, context):
+        job = context.job
         bot = context.bot
+
+        ad = job.context[0]
+        chat_id = job.context[1]
+        user = job.context[2]
 
         self.logger.info("Posting Ad %s on the channel", ad.id)
 
@@ -322,7 +407,12 @@ class Sneakerbot(object):
             sent_message = bot.send_photo(chat_id=self.channel_id, photo=ad.photo, caption=caption,
                             parse_mode=ParseMode.HTML)
 
-        return sent_message.message_id
+        # Save message id in case I want to modify the message
+        ad.message_id = sent_message.message_id
+
+        # Insert the ad
+        self.ads.append(ad)
+        self.update_save_file(self.ads_save_file, self.ads)
 
     def text_handle(self, update, context):
         message = update.message
@@ -359,14 +449,25 @@ class Sneakerbot(object):
         # Brand selection
         if self.user_stage[user.id] is Stages.BRAND_SELECTION:
             if validate_brand(message.text):
-                self.pending_ads[user.id].brand = message.text # Insert brand name
-                self.logger.info("User %s selected brand %s for its Ad", user.name, message.text)
-                self.user_stage[user.id] = Stages.SHOE_NAME_SELECTION
-                bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['shoe_name_selection'])
+                if message.text == 'Altro':
+                    self.user_stage[user.id] = Stages.CUSTOM_BRAND_INSERTION
+                    bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['custom_brand_insertion'])
+                else:
+                    self.pending_ads[user.id].brand = message.text # Insert brand name
+                    self.logger.info("User %s selected brand %s for its Ad", user.name, message.text)
+                    self.user_stage[user.id] = Stages.SHOE_NAME_SELECTION
+                    bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['shoe_name_selection'])
             else:
                 bot.send_message(chat_id, botDialogs.DIALOGS['brand_not_valid'])
                 self.set_keyboard(user, update, bot)
-                #TODO: implement altro
+            return
+
+        # Custom Brand insertion
+        if self.user_stage[user.id] is Stages.CUSTOM_BRAND_INSERTION:
+            self.pending_ads[user.id].brand = message.text
+            self.logger.info("User %s selected brand %s for its Ad", user.name, message.text)
+            self.user_stage[user.id] = Stages.SHOE_NAME_SELECTION
+            bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['shoe_name_selection'])
             return
 
         # Shoe name insertion
@@ -430,11 +531,90 @@ class Sneakerbot(object):
                 self.pending_ads[user.id].price = int(message.text)
                 self.logger.info("User %s inserted price: %d", user.name, int(message.text))
                 if self.pending_ads[user.id].type is AdTypes.SELL:
-                    self.user_stage[user.id] = Stages.PHOTO_INSERTION
-                    bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['photo_insertion'])
+                    self.user_stage[user.id] = Stages.SET_AVAILABILITY
+                    self.set_keyboard(user, update, bot)
                 elif self.pending_ads[user.id].type is AdTypes.BUY :
                     self.user_stage[user.id] = Stages.NOTE_INSERT_REQ
                     self.set_keyboard(user, update, bot)
+            return
+
+        # Set Availabilty
+        if self.user_stage[user.id] is Stages.SET_AVAILABILITY:
+            if message.text == 'SI':
+                self.pending_ads[user.id].availability = "available"
+                self.user_stage[user.id] = Stages.SET_SHIPPING
+                self.set_keyboard(user, update, bot)
+            elif message.text == 'NO':
+                self.user_stage[user.id] = Stages.STORE_INSERTION
+                bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['store_insertion'])
+            else:
+                bot.send_message(chat_id, botDialogs.DIALOGS['not_valid_choice'])
+                self.set_keyboard(user, update, bot)
+            return
+
+        # Store insertion
+        if self.user_stage[user.id] is Stages.STORE_INSERTION:
+            self.pending_ads[user.id].availability = message.text
+            self.user_stage[user.id] = Stages.SET_SHIPPING
+            self.set_keyboard(user, update, bot)
+            return
+
+        # Set shipping
+        if self.user_stage[user.id] is Stages.SET_SHIPPING:
+            if message.text == 'SI':
+                self.pending_ads[user.id].shipping = True
+                self.user_stage[user.id] = Stages.ACCEPT_PAYPAL
+                self.set_keyboard(user, update, bot)
+            elif message.text == 'NO':
+                self.pending_ads[user.id].shipping = False
+                self.user_stage[user.id] = Stages.ACCEPT_PAYPAL
+                self.set_keyboard(user, update, bot)
+            else:
+                bot.send_message(chat_id, botDialogs.DIALOGS['not_valid_choice'])
+                self.set_keyboard(user, update, bot)
+            return
+
+        # Accept Paypal
+        if self.user_stage[user.id] is Stages.ACCEPT_PAYPAL:
+            if message.text == 'SI':
+                self.pending_ads[user.id].accept_paypal = True
+                self.user_stage[user.id] = Stages.PHOTO_INSERTION
+                bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['photo_insertion'])
+            elif message.text == 'NO':
+                self.pending_ads[user.id].accept_paypal = False
+                self.user_stage[user.id] = Stages.PHOTO_INSERTION
+                bot.send_message(chat_id, botDialogs.KEYBOARD_TEXTS['photo_insertion'])
+            else:
+                bot.send_message(chat_id, botDialogs.DIALOGS['not_valid_choice'])
+                self.set_keyboard(user, update, bot)
+            return
+
+        # Begin Feedback
+        if self.user_stage[user.id] is Stages.INSERT_FEEDBACK:
+            if message.text == user.name:
+                bot.send_message(chat_id, botDialogs.DIALOGS['autovote_error'])
+                self.user_stage[user.id] = Stages.MENU
+                self.set_keyboard(user, update, bot)
+                return
+            self.feedbacking[user.id] = message.text
+            self.user_stage[user.id] = Stages.EVALUATE_FEEDBACK
+            self.set_keyboard(user, update, bot)
+            return
+
+        # Evaluate Feedback
+        if self.user_stage[user.id] is Stages.EVALUATE_FEEDBACK:
+            if message.text == 'Positiva':
+                self.vote(bot, message, self.feedbacking[user.id], 1)
+                self.user_stage[user.id] = Stages.MENU
+                self.set_keyboard(user, update, bot)
+            elif message.text == 'Negativa':
+                self.vote(bot, message, self.feedbacking[user.id], -1)
+                self.user_stage[user.id] = Stages.MENU
+                self.set_keyboard(user, update, bot)
+            else:
+                bot.send_message(chat_id, botDialogs.DIALOGS['not_valid_choice'])
+                self.set_keyboard(user, update, bot)
+            self.logger.info("User %s is giving a feedback on user %s", user.name, self.feedbacking[user.id])
             return
 
     def send_ad_preview(self, update, context):
@@ -497,9 +677,28 @@ class Sneakerbot(object):
             caption = caption + '\nLuogo: ' + escape(ad.region)
             caption = caption + '\nCondizione: ' + escape(ad.condition) + ' | Prezzo: ' + self.format_number(ad.price) + '€'
             caption = caption + '\nTaglia: ' + self.format_number(ad.number)
+            caption = caption + '\nDisponibilità: '
+            if ad.availability == 'available':
+                caption = caption + '<i>Disponibile</i>'
+            else:
+                caption = caption + '<i>In arrivo, acquistata presso ' + escape(ad.availability) + '</i>'
+            caption = caption + '\nSpedizione: '
+            if ad.shipping:
+                caption = caption + 'si'
+            else:
+                caption = caption + 'no'
+            caption = caption + ' | Accetta Paypal: '
+            if ad.accept_paypal:
+                caption = caption + 'si'
+            else:
+                caption = caption + 'no'
             if ad.notes != "":
                 caption = caption + "\nNote: " + '<i>' + escape(ad.notes) + '</i>'
             caption = caption + '\nContattare: ' + escape(user.name)
+            if self.count_feedbacks(user.id, 1) != 0:
+                caption = caption + '<i>\nUtente con ' + str(self.count_feedbacks(user.id, 1)) + ' feedback positivi</i>'
+            if self.count_feedbacks(user.id, -1) != 0:
+                caption = caption + '<i>\nUtente con ' + str(self.count_feedbacks(user.id, -1)) + ' feedback negativi</i>'
         else:
             caption = 'Cerco <b>' + escape(ad.brand) + ' ' + escape(ad.shoe_name) + '</b>'
             caption = caption + '\nLuogo: ' + escape(ad.region)
@@ -514,18 +713,54 @@ class Sneakerbot(object):
 
         return caption
 
-    def update_save_file(self):
-        with open(self.save_file, 'wb') as filename:
-            pickle.dump(self.ads, filename)
+    def update_save_file(self, save_file, my_list):
+        json_string = jsonpickle.encode(my_list)
+        with open(save_file, 'w') as f:
+            f.write(json_string)
 
     def load_save_file(self):
+        # Ads
         try:
-            if os.stat(self.save_file).st_size != 0:
-                with open(self.save_file, 'rb') as filename:
-                    self.ads = pickle.load(filename)
+            if os.stat(self.ads_save_file).st_size != 0:
+                with open(self.ads_save_file, 'r') as f:
+                    json_string = f.read()
+                    self.ads = jsonpickle.decode(json_string)
+            self.logger.info("Successfully loaded ads save file")
         except FileNotFoundError:
-            self.logger.info("No save file found")
+            self.logger.info("No ads save file found")
             self.ads = []
+        except pickle.PickleError:
+            self.ads = []
+            self.update_save_file(self.ads_save_file, self.ads)
+
+        # Users
+        try:
+            if os.stat(self.user_save_file).st_size != 0:
+                with open(self.user_save_file, 'r') as f:
+                    json_string = f.read()
+                    self.user_list = jsonpickle.decode(json_string)
+            self.logger.info("Successfully loaded users save file")
+        except FileNotFoundError:
+            self.logger.info("No user save file found")
+            self.user_list = []
+        except pickle.PickleError:
+            self.user_list = []
+            self.update_save_file(self.user_save_file, self.user_list)
+        
+        # Feedback
+        try:
+            if os.stat(self.feedback_save_file).st_size != 0:
+                with open(self.feedback_save_file, 'r') as f:
+                    json_string = f.read()
+                    self.feedback_list = jsonpickle.decode(json_string)
+            self.logger.info("Successfully loaded feedback save file")
+        except FileNotFoundError:
+            self.logger.info("No feedback save file found")
+            self.feedback_list = []
+        except pickle.PickleError:
+            self.feedback_list = []
+            self.update_save_file(self.feedback_save_file, self.feedback_list)
+        
     def run(self):
         # Start the bot
         self.updater.start_polling()
