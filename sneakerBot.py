@@ -2,6 +2,7 @@ from telegram.ext import (Updater, ConversationHandler, CommandHandler, Callback
                             MessageHandler, filters)
 from telegram import (KeyboardButton, ReplyKeyboardMarkup, ParseMode, InlineKeyboardButton,
                         InlineKeyboardMarkup)
+from datetime import (time, date, timedelta, datetime)
 from stages import Stages
 from ads import Ads
 from adTypes import AdTypes
@@ -19,9 +20,10 @@ from feedback import Feedback
 import jsonpickle
 import json
 from copy import deepcopy
+import hashlib
 
 class Sneakerbot(object):
-    def __init__(self, bot_token, channel_id, ads_save_file, user_save_file, feedback_save_file):
+    def __init__(self, CONFIG):
 
         # Enable logging
         logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -32,26 +34,41 @@ class Sneakerbot(object):
         self.user_stage = {} # Users dictionary -> {username : state}
         self.feedbacking = {} # pending feedback -> {from : to}
 
-        self.channel_id = channel_id
-        self.ads_save_file = ads_save_file
+        self.channel_id = CONFIG['channel']
+        self.group_id = ""
+        self.ads_save_file = CONFIG['ads_save_file']
 
         # Save all the ads
         self.ads = []
         self.pending_ads = {}
         self.queue_ads = []
 
+        # Misc
+        self.timer = 15
+
+        # Ads id things
+        self.id_save_file = CONFIG['id_save_file']
+        self.next_id = 0
+
         # Infos about users
         self.user_list = []
         self.feedback_list = []
-        self.user_save_file = user_save_file
-        self.feedback_save_file = feedback_save_file
+        self.user_save_file = CONFIG['user_save_file']
+        self.feedback_save_file = CONFIG['feedback_save_file']
 
         # Load data
         self.load_save_file()
 
+        # Password
+        self.password = CONFIG['password']
+        self.admin_list = []
+
         # Init bot tools to retrieve data
+        bot_token = CONFIG['token']
         self.updater = Updater(bot_token, use_context=True)
         self.dispatcher = self.updater.dispatcher
+
+        self.updater.job_queue.run_daily(callback=self.delete_old_posts, time=time(hour=12, minute=00))
 
         for handler in self.get_handlers():
             self.dispatcher.add_handler(handler)
@@ -71,6 +88,20 @@ class Sneakerbot(object):
             bot.send_message(update.message.chat_id, botDialogs.DIALOGS['username_not_found'], parse_mode=ParseMode.HTML)
 
         self.set_keyboard(user, update, bot)
+
+    def delete_old_posts(self, context):
+        new_ads = []
+        bot = self.updater.bot
+
+        for ad in self.ads:
+            if (datetime.now() - ad.post_date) > timedelta(days=29):
+                bot.delete_message(self.channel_id, ad.message_id)
+                self.logger.info("Message %s deleted", ad.message_id)
+            else:
+                new_ads.append(ad)
+
+        self.ads = new_ads
+        self.update_save_file(self.ads_save_file, self.ads)
 
     def add_user(self, usr):
         if usr.id not in [u.id for u in self.user_list]:
@@ -247,26 +278,24 @@ class Sneakerbot(object):
 
     def get_handlers(self):
         handlers = []
-        handlers.append(CommandHandler("start", self.start))
-        handlers.append(MessageHandler(filters.Filters.regex(r'Crea annuncio'), self.new_ads))
-        handlers.append(MessageHandler(filters.Filters.regex(r'I miei annunci'), self.my_ads))
-        handlers.append(MessageHandler(filters.Filters.regex(r'Rimuovi un annuncio'), self.generate_delete_keyboard))
-        handlers.append(MessageHandler(filters.Filters.regex(r'Valuta un utente'), self.begin_feedback))
-        handlers.append(MessageHandler(filters.Filters.regex(r'Reset'), self.reset))
-        handlers.append(CommandHandler("reset", self.reset))
-        handlers.append(MessageHandler(filters.Filters.regex(r'Confermo'), self.confirm_operation))
-        handlers.append(MessageHandler(filters.Filters.text, self.text_handle))
-        handlers.append(MessageHandler(filters.Filters.photo, self.image_handler))
+        handlers.append(CommandHandler(command="start", callback=self.start, filters=filters.Filters.private))
+        handlers.append(MessageHandler(filters.Filters.private & filters.Filters.regex(r'Crea annuncio'), self.new_ads))
+        handlers.append(MessageHandler(filters.Filters.private & filters.Filters.regex(r'I miei annunci'), self.my_ads))
+        handlers.append(MessageHandler(filters.Filters.private & filters.Filters.regex(r'Rimuovi un annuncio'), self.generate_delete_keyboard))
+        handlers.append(MessageHandler(filters.Filters.private & filters.Filters.regex(r'Valuta un utente'), self.begin_feedback))
+        handlers.append(MessageHandler(filters.Filters.private & filters.Filters.regex(r'Reset'), self.reset))
+        handlers.append(CommandHandler(command="reset", callback=self.reset, filters=filters.Filters.private))
+        handlers.append(MessageHandler(filters.Filters.private & filters.Filters.regex(r'Confermo'), self.confirm_operation))
+        handlers.append(MessageHandler(filters.Filters.private & filters.Filters.text, self.text_handle))
+        handlers.append(MessageHandler(filters.Filters.private & filters.Filters.photo, self.image_handler))
         handlers.append(CallbackQueryHandler(self.delete_ad))
+        handlers.append(CommandHandler(command="setgroup", callback=self.set_group, filters=filters.Filters.group))
+        handlers.append(CommandHandler(command="newpassword", callback=self.new_password, filters=filters.Filters.private))
+        handlers.append(CommandHandler(command="setadmin", callback=self.set_admin, filters=filters.Filters.private))
+        handlers.append(CommandHandler(command="block", callback=self.block_ad, filters=filters.Filters.group))
+        handlers.append(CommandHandler(command="settimer", callback=self.set_timer, filters=filters.Filters.private))
 
         return handlers
-
-    def post_delayed_ad(self, context, ad, chat_id):
-        context.job_queue.run_once(self.post_to_channel, 15, context=(ad, chat_id))
-
-    def alarm(self, context):
-        job = context.job
-        context.bot.send_message(job.context, text='Beep!')
 
     def reset(self, update, context):
         message = update.message
@@ -282,6 +311,21 @@ class Sneakerbot(object):
 
         self.user_stage[user.id] = Stages.MENU
         self.set_keyboard(user, update, bot)
+
+    def set_timer(self, update, context):
+        message = update.message
+        user = message.from_user
+        chat_id = message.chat_id
+        bot = context.bot
+
+        if user.id in self.admin_list:
+            try:
+                self.timer = context.args[0]
+                bot.send_message(chat_id, botDialogs.DIALOGS['timer_success'])
+            except (IndexError, ValueError):
+                bot.send_message(chat_id, botDialogs.DIALOGS['timer_error'])
+        else:
+            bot.send_message(chat_id, botDialogs.DIALOGS['permission_denied'])
 
     def my_ads(self, update, context):
         message = update.message
@@ -384,10 +428,32 @@ class Sneakerbot(object):
 
         self.logger.info("User %s confirmed his Ad", user.name)
 
+        self.pending_ads[user.id].id = hex(self.next_id)
+        self.next_id += 1
+        self.update_next_id()
+        self.pending_ads[user.id].post_date = datetime.now()    
         ad = deepcopy(self.pending_ads[user.id])
 
+        # Post to the private group
+        self.queue_ads.append(ad)
+        self.post_to_group(ad, user, bot)
         # Call delayed posting
-        context.job_queue.run_once(self.post_to_channel, 20, context=(ad, chat_id, user))
+        context.job_queue.run_once(self.post_to_channel, 60*int(self.timer), context=(ad, chat_id, user))
+
+    def post_to_group(self, ad, user, bot):
+        
+        if not self.group_id:
+            bot.send_message(chat_id, botDialogs.DIALOGS['no_group_found'])
+            return
+
+        self.logger.info("Posting Ad %s on the private group", ad.id)
+
+        caption = self.format_ad(ad, user, review=True)
+        if ad.type is AdTypes.BUY:
+            sent_message = bot.send_message(chat_id=self.group_id, text=caption, parse_mode=ParseMode.HTML)
+        elif ad.type is AdTypes.SELL:
+            sent_message = bot.send_photo(chat_id=self.group_id, photo=ad.photo, caption=caption,
+                            parse_mode=ParseMode.HTML)
 
     def post_to_channel(self, context):
         job = context.job
@@ -396,6 +462,10 @@ class Sneakerbot(object):
         ad = job.context[0]
         chat_id = job.context[1]
         user = job.context[2]
+
+        if ad.id not in [a.id for a in self.queue_ads]:
+            self.logger.info("Ad %s discarded previously on the private group...", ad.id)
+            return
 
         self.logger.info("Posting Ad %s on the channel", ad.id)
 
@@ -413,6 +483,40 @@ class Sneakerbot(object):
         # Insert the ad
         self.ads.append(ad)
         self.update_save_file(self.ads_save_file, self.ads)
+
+        # Remove the ad from the queue
+        self.remove_from_queue(ad.id)
+
+    def block_ad(self, update, context):
+        message = update.message
+        user = message.from_user
+        chat_id = message.chat_id
+        bot = context.bot
+        if user.id in self.admin_list:
+            try:
+                result = self.remove_from_queue(context.args[0])
+                if result:
+                    bot.send_message(chat_id, botDialogs.DIALOGS['block_confirm'])
+                else:
+                    bot.send_message(chat_id, botDialogs.DIALOGS['id_not_found'])
+            except IndexError:
+                bot.send_message(chat_id, botDialogs.DIALOGS['error_block_ad'])
+        else:
+            bot.send_message(chat_id, botDialogs.DIALOGS['permission_denied'])
+
+
+    def remove_from_queue(self, id):
+        new_queue = []
+        result = False
+
+        for a in self.queue_ads:
+            if a.id != id:
+                new_queue.append(a)
+            else:
+                result = True
+        self.queue_ads = new_queue
+
+        return result
 
     def text_handle(self, update, context):
         message = update.message
@@ -635,6 +739,69 @@ class Sneakerbot(object):
             bot.send_photo(chat_id=chat_id, photo=ad.photo, caption=caption,
                             parse_mode=ParseMode.HTML)
 
+    def set_group(self, update, context):
+        message = update.message
+        user = message.from_user
+        chat_id = message.chat_id
+        bot = context.bot
+
+        if user.id in self.admin_list:
+            self.group_id = chat_id
+            bot.send_message(chat_id, botDialogs.DIALOGS['confirm_group_set'])
+        else:
+            bot.send_message(chat_id, botDialogs.DIALOGS['permission_denied'])
+
+    def new_password(self, update, context):
+        message = update.message
+        user = message.from_user
+        chat_id = message.chat_id
+        bot = context.bot
+
+        if user.id in self.admin_list:
+            try:
+                m = hashlib.sha256()
+                m.update(context.args[0].encode('utf-8'))
+                if len(self.password) == 0:
+                    self.password = m.digest()
+                    update.message.reply_text(botDialogs.DIALOGS['password_updated'])
+                else:
+                    if self.password == m.digest():
+                        n = hashlib.sha256()
+                        n.update(context.args[1].encode('utf-8'))
+                        self.password = n.digest()
+                        update.message.reply_text(botDialogs.DIALOGS['password_updated'])
+                    else:
+                        bot.send_message(chat_id, botDialogs.DIALOGS['invalid_password'])
+            except IndexError:
+                bot.send_message(chat_id, botDialogs.DIALOGS['error_set_password'])
+        else:
+            bot.send_message(chat_id, botDialogs.DIALOGS['permission_denied'])
+            
+    def set_admin(self, update, context):
+        message = update.message
+        user = message.from_user
+        chat_id = message.chat_id
+        bot = context.bot
+
+        if user.id in self.admin_list:
+            bot.send_message(chat_id, botDialogs.DIALOGS['already_admin'])
+            return
+
+        if len(self.password) != 0:
+            try:
+                m = hashlib.sha256()
+                m.update(context.args[0].encode('utf-8'))
+                if self.password == m.digest():
+                    self.admin_list.append(user.id)
+                    bot.send_message(chat_id, botDialogs.DIALOGS['admin_set_confirm'])
+                else:
+                    bot.send_message(chat_id, botDialogs.DIALOGS['invalid_password'])
+            except IndexError:
+                update.message.reply_text(botDialogs.DIALOGS['invalid_set_admin_usage'])
+        else:
+            self.admin_list.append(user.id)
+            bot.send_message(chat_id, botDialogs.DIALOGS['admin_set_confirm'])
+
     def image_handler(self, update, context):
         message = update.message
         user = message.from_user
@@ -717,6 +884,10 @@ class Sneakerbot(object):
         json_string = jsonpickle.encode(my_list)
         with open(save_file, 'w') as f:
             f.write(json_string)
+    
+    def update_next_id(self):
+        with open(self.id_save_file, 'w') as f:
+            f.write(str(self.next_id))
 
     def load_save_file(self):
         # Ads
@@ -760,6 +931,16 @@ class Sneakerbot(object):
         except pickle.PickleError:
             self.feedback_list = []
             self.update_save_file(self.feedback_save_file, self.feedback_list)
+        
+        # Last id
+        try:
+            with open(self.id_save_file, 'r') as f:
+                self.next_id = int(f.read())
+        except ValueError:
+            print("FUCK!")
+        except FileNotFoundError:
+            self.logger.info("No id file found")
+            self.next_id = 1
         
     def run(self):
         # Start the bot

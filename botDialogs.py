@@ -14,7 +14,21 @@ DIALOGS = {
     'vote_registered': 'Grazie, il tuo feedback è stato registrato',
     'autovote_error': 'Non puoi auto-valutarti!',
     'user_not_found': 'Utente non trovato',
-    'username_not_found': '<b>ATTENZIONE</b> Non hai un username impostato, potrebbe non essere possibile per i tuoi clienti contattarti! Inseriscine uno dalle impostazioni di Telegram!'
+    'username_not_found': '<b>ATTENZIONE</b> Non hai un username impostato, potrebbe non essere possibile per i tuoi clienti contattarti! Inseriscine uno dalle impostazioni di Telegram!',
+    'already_admin': 'Sei già amministratore!',
+    'invalid_password': 'Password non corretta!',
+    'invalid_set_admin_usage': 'Uso del comando: /setadmin password',
+    'admin_set_confirm': 'Sei stato correttamente aggiunto alla lista degli admin',
+    'confirm_group_set': 'Gruppo selezionato con successo!',
+    'password_updated': 'Password aggiornata con successo!',
+    'error_set_password': 'Uso del comando /newpassword vecchiapassword nuovapassword',
+    'permission_denied': 'Devi essere un admin per accedere a questo comando!',
+    'error_block_ad': 'Uso del comando: /block idannuncio',
+    'block_confirm': 'Annuncio bloccato con successo',
+    'id_not_found': 'Id annuncio non trovato, riprovare',
+    'timer_error': 'Uso del comando: /settimer minuti',
+    'timer_success': 'Timer impostato correttamente',
+    'no_group_found': 'Non hai selezionato un gruppo privato!'
 }
 
 KEYBOARD_TEXTS = {

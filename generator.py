@@ -8,7 +8,7 @@ BRANDS = ['Adidas', 'Jordan', 'Nike', 'Altro']
 BOOL_CHOICE = ['SI', 'NO']
 
 def generate_sizes():
-    size = 4
+    size = 4.0
     ndx = 0
     kb = []
     buttons = []

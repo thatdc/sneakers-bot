@@ -14,6 +14,7 @@ class Ads(object):
         self.shipping = False
         self.accept_paypal = False
         self.photo = ""
-        self.id = str(uuid.uuid4())
+        self.id = ""
         self.message_id = ""
         self.notes = ""
+        self.post_date = ""
