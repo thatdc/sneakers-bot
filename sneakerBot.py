@@ -289,11 +289,12 @@ class Sneakerbot(object):
         handlers.append(MessageHandler(filters.Filters.private & filters.Filters.text, self.text_handle))
         handlers.append(MessageHandler(filters.Filters.private & filters.Filters.photo, self.image_handler))
         handlers.append(CallbackQueryHandler(self.delete_ad))
-        handlers.append(CommandHandler(command="setgroup", callback=self.set_group, filters=filters.Filters.group))
+        #handlers.append(CommandHandler(command="setgroup", callback=self.set_group, filters=filters.Filters.group))
+        handlers.append(CommandHandler(command="setchannel", callback=self.set_channel, filters=filters.Filters.private))
         handlers.append(CommandHandler(command="newpassword", callback=self.new_password, filters=filters.Filters.private))
         handlers.append(CommandHandler(command="setadmin", callback=self.set_admin, filters=filters.Filters.private))
-        handlers.append(CommandHandler(command="block", callback=self.block_ad, filters=filters.Filters.group))
-        handlers.append(CommandHandler(command="settimer", callback=self.set_timer, filters=filters.Filters.private))
+        #handlers.append(CommandHandler(command="block", callback=self.block_ad, filters=filters.Filters.group))
+        #handlers.append(CommandHandler(command="settimer", callback=self.set_timer, filters=filters.Filters.private))
 
         return handlers
 
@@ -324,6 +325,23 @@ class Sneakerbot(object):
                 bot.send_message(chat_id, botDialogs.DIALOGS['timer_success'])
             except (IndexError, ValueError):
                 bot.send_message(chat_id, botDialogs.DIALOGS['timer_error'])
+        else:
+            bot.send_message(chat_id, botDialogs.DIALOGS['permission_denied'])
+
+    def set_channel(self, update, context):
+        message = update.message
+        user = message.from_user
+        chat_id = message.chat_id
+        bot = context.bot
+
+        if user.id in self.admin_list:
+            new_channel = message.text.split(' ')[1]
+            if new_channel.startswith('@'):
+                self.channel_id = new_channel
+                self.logger.info("User %s changed channel, new channel id: %s", user.name, new_channel)
+                bot.send_message(chat_id, botDialogs.DIALOGS['channel_change_confirm'])
+            else:
+                bot.send_message(chat_id, botDialogs.DIALOGS['invalid_channel'])
         else:
             bot.send_message(chat_id, botDialogs.DIALOGS['permission_denied'])
 
@@ -434,11 +452,12 @@ class Sneakerbot(object):
         self.pending_ads[user.id].post_date = datetime.now()    
         ad = deepcopy(self.pending_ads[user.id])
 
-        # Post to the private group
-        self.queue_ads.append(ad)
-        self.post_to_group(ad, user, bot)
+        # Post on the channel
+        self.post_to_channel_now(bot, user, ad)
+        
         # Call delayed posting
-        context.job_queue.run_once(self.post_to_channel, 60*int(self.timer), context=(ad, chat_id, user))
+        # DELETED: NO MORE REQUIRED BY COSTUMER
+        #context.job_queue.run_once(self.post_to_channel, 60*int(self.timer), context=(ad, chat_id, user))
 
     def post_to_group(self, ad, user, bot):
         
@@ -454,6 +473,22 @@ class Sneakerbot(object):
         elif ad.type is AdTypes.SELL:
             sent_message = bot.send_photo(chat_id=self.group_id, photo=ad.photo, caption=caption,
                             parse_mode=ParseMode.HTML)
+
+    def post_to_channel_now(self, bot, user, ad):
+        caption = self.format_ad(ad, user)
+
+        if ad.type is AdTypes.BUY:
+            sent_message = bot.send_message(chat_id=self.channel_id, text=caption, parse_mode=ParseMode.HTML)
+        elif ad.type is AdTypes.SELL:
+            sent_message = bot.send_photo(chat_id=self.channel_id, photo=ad.photo, caption=caption,
+                            parse_mode=ParseMode.HTML)
+
+        # Save message id in case I want to modify the message
+        ad.message_id = sent_message.message_id
+
+        # Insert the ad
+        self.ads.append(ad)
+        self.update_save_file(self.ads_save_file, self.ads)
 
     def post_to_channel(self, context):
         job = context.job

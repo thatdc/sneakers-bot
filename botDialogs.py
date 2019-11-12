@@ -1,5 +1,5 @@
 DIALOGS = {
-    'create_ad_info': 'Non vendere scarpe tarocche, e cose così insomma... Confermi?',
+    'create_ad_info': 'Dichiaro utilizzando questo bot di non vendere e non cercare oggetti fake e di rispettare tutti gli utenti che fanno parte della community',
     'need_reset': 'Utente non riconosciuto, o in stato non consistente, premi /reset per tornare al menu. Oppure, /start per iniziare ad usare il bot',
     'need_start': 'Per iniziare ad usare il bot, digita /start',
     'digit_error': 'Perfavore, inserisci un numero',
@@ -28,7 +28,9 @@ DIALOGS = {
     'id_not_found': 'Id annuncio non trovato, riprovare',
     'timer_error': 'Uso del comando: /settimer minuti',
     'timer_success': 'Timer impostato correttamente',
-    'no_group_found': 'Non hai selezionato un gruppo privato!'
+    'no_group_found': 'Non hai selezionato un gruppo privato!',
+    'invalid_channel': 'Nome del canale non valido! (Suggerimento, il nome di un canale inizia sempre per \'@\' e non contiene spazi)',
+    'channel_change_confirm': 'Canale correttamente modificato!'
 }
 
 KEYBOARD_TEXTS = {
@@ -36,7 +38,7 @@ KEYBOARD_TEXTS = {
     'ad_insert_confirm': 'Confermi di aver letto l\'informativa?',
     'region_select': 'In che regione abiti?',
     'shoe_name_selection': 'Scrivi il nome del modello della scarpa',
-    'number_selection': 'Inserisci la taglia della scarpa',
+    'number_selection': 'Inserisci la taglia della scarpa (US)',
     'condition_selection': 'Seleziona la condizione',
     'price_selection_sell': 'Inserisci il prezzo',
     'price_selection_buy': 'Quanto è il tuo budget?',
