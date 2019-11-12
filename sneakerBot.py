@@ -2,6 +2,8 @@ from telegram.ext import (Updater, ConversationHandler, CommandHandler, Callback
                             MessageHandler, filters)
 from telegram import (KeyboardButton, ReplyKeyboardMarkup, ParseMode, InlineKeyboardButton,
                         InlineKeyboardMarkup)
+from telegram.error import (TelegramError, Unauthorized, BadRequest, 
+                            TimedOut, ChatMigrated, NetworkError)
 from datetime import (time, date, timedelta, datetime)
 from stages import Stages
 from ads import Ads
@@ -72,6 +74,8 @@ class Sneakerbot(object):
 
         for handler in self.get_handlers():
             self.dispatcher.add_handler(handler)
+        
+        self.dispatcher.add_error_handler(self.error_callback)
 
     def start(self, update, context):
         """Start the bot"""
@@ -250,6 +254,12 @@ class Sneakerbot(object):
             return
 
         selected_ad = self.get_ad_by_id(query.data)
+        if not selected_ad:
+            self.logger.info("Ad %s no longer exists, cannot delete it", query.data)
+            self.user_stage[user.id] = Stages.MENU
+            self.set_keyboard(user, update, bot, chat_id)
+            return
+        
         self.remove_from_channel(bot, selected_ad)
 
         self.ads = list(filter(lambda x: x.id != query.data, self.ads))
@@ -297,6 +307,22 @@ class Sneakerbot(object):
         #handlers.append(CommandHandler(command="settimer", callback=self.set_timer, filters=filters.Filters.private))
 
         return handlers
+
+    def error_callback(self, update, context):
+        try:
+            raise context.error
+        except BadRequest:
+            self.logger.warning("Bad Request, logging message...")
+            print(update.message)
+        except TimedOut:
+            self.logger.warning("Request timed out, check your connection or try to adjust timeout settings")
+        except Unauthorized:
+            self.logger.warning("Unauthorized request for message %s", update.message)
+        except TelegramError as e:
+            self.logger.warning("General TelegramError occured. Printing details...")
+            print(e)
+        except NetworkError: 
+            self.logger.warning("Network Error, check connection. Users might encounter delays and errors")
 
     def reset(self, update, context):
         message = update.message
@@ -444,7 +470,7 @@ class Sneakerbot(object):
         self.user_stage[user.id] = Stages.MENU
         self.set_keyboard(user, update, bot)
 
-        self.logger.info("User %s confirmed his Ad", user.name)
+        self.logger.info("User %s confirmed his Ad with id %s", user.name, hex(self.next_id))
 
         self.pending_ads[user.id].id = hex(self.next_id)
         self.next_id += 1
